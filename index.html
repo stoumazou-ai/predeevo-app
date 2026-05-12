@@ -333,7 +333,7 @@ input:focus,textarea:focus,select:focus{border-color:var(--blue)}
         <div class="lbl">Invitation link</div>
         <div class="link-box">
           <span class="link-url" id="invite-link"></span>
-          <button class="btn btn-blue btn-sm" onclick="copyLink()"><i class="ti ti-copy"></i>Copy</button>
+          <button class="btn btn-blue btn-sm" onclick="copyLink(this)"><i class="ti ti-copy"></i>Copy</button>
         </div>
         <div class="alert alert-info"><i class="ti ti-info-circle"></i>This link is valid for 30 days and works only once. The client will see your firm's KYC form pre-filled with their details.</div>
       </div>
@@ -349,6 +349,18 @@ input:focus,textarea:focus,select:focus{border-color:var(--blue)}
         <div class="fg">
           <label class="lbl">Company / Entity name</label>
           <input type="text" id="inv-company" placeholder="Company name (optional)">
+        </div>
+        <div class="fg">
+          <label class="lbl">Link validity period</label>
+          <select id="inv-expiry-days">
+            <option value="7">7 days</option>
+            <option value="14">14 days</option>
+            <option value="30" selected>30 days (default)</option>
+            <option value="60">60 days</option>
+            <option value="90">90 days</option>
+            <option value="180">6 months</option>
+          </select>
+          <div style="font-size:10.5px;color:var(--muted);margin-top:4px">After this period the link will stop working and the client will need a new one.</div>
         </div>
         <div class="fg">
           <label class="lbl">Internal notes</label>
@@ -683,10 +695,10 @@ function renderInvitations(){
         <td><span class="badge badge-${i.status}">${i.status}</span></td>
         <td style="white-space:nowrap">
           ${i.status === 'pending' ? `
-            <button class="btn btn-outline btn-sm" onclick="copyInviteLink('${i.token}')"><i class="ti ti-copy"></i>Copy</button>
+            <button class="btn btn-outline btn-sm" onclick="copyInviteLink('${i.token}', this)"><i class="ti ti-copy"></i>Copy</button>
             <button class="btn btn-outline btn-sm" onclick="revokeInvitation('${i.id}')" style="color:var(--red);margin-left:4px"><i class="ti ti-x"></i></button>
           ` : `
-            <button class="btn btn-outline btn-sm" onclick="copyInviteLink('${i.token}')"><i class="ti ti-copy"></i></button>
+            <button class="btn btn-outline btn-sm" onclick="copyInviteLink('${i.token}', this)"><i class="ti ti-copy"></i></button>
           `}
         </td>
       </tr>`).join('')}
@@ -699,6 +711,7 @@ function openNewInvitation(){
   document.getElementById('inv-email').value = '';
   document.getElementById('inv-company').value = '';
   document.getElementById('inv-notes').value = '';
+  document.getElementById('inv-expiry-days').value = '30';
   document.getElementById('invite-result').style.display = 'none';
   document.getElementById('invite-form').style.display = 'block';
   document.getElementById('invite-submit-btn').style.display = 'inline-flex';
@@ -718,12 +731,16 @@ async function createInvitation(){
   btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i>Creating...';
 
   try {
+    const expiryDays = parseInt(document.getElementById('inv-expiry-days').value) || 30;
+    const expiresAt = new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000).toISOString();
+
     const { data, error } = await sb.from('kyc_invitations').insert({
       client_name: name,
       client_email: email,
       client_company: company || null,
       notes: notes || null,
-      created_by: 'Sav Toumazou'
+      created_by: 'Sav Toumazou',
+      expires_at: expiresAt
     }).select().single();
 
     if(error) throw error;
@@ -742,22 +759,49 @@ async function createInvitation(){
   }
 }
 
-function copyLink(){
+function copyLink(btn){
   const link = document.getElementById('invite-link').textContent;
-  navigator.clipboard.writeText(link);
-  const btn = event.target.closest('button');
-  const orig = btn.innerHTML;
-  btn.innerHTML = '<i class="ti ti-check"></i>Copied';
-  setTimeout(() => btn.innerHTML = orig, 1500);
+  // Use modern clipboard API with fallback
+  try {
+    navigator.clipboard.writeText(link).then(() => {
+      const orig = btn.innerHTML;
+      btn.innerHTML = '<i class="ti ti-check"></i>Copied';
+      setTimeout(() => btn.innerHTML = orig, 1500);
+    }).catch(() => {
+      fallbackCopy(link, btn);
+    });
+  } catch(e){
+    fallbackCopy(link, btn);
+  }
 }
 
-function copyInviteLink(token){
+function fallbackCopy(text, btn){
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.left = '-9999px';
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand('copy'); } catch(e){}
+  document.body.removeChild(ta);
+  if(btn){
+    const orig = btn.innerHTML;
+    btn.innerHTML = '<i class="ti ti-check"></i>Copied';
+    setTimeout(() => btn.innerHTML = orig, 1500);
+  }
+}
+
+function copyInviteLink(token, btn){
   const link = `${KYC_FORM_URL}?token=${token}`;
-  navigator.clipboard.writeText(link);
-  const btn = event.target.closest('button');
-  const orig = btn.innerHTML;
-  btn.innerHTML = '<i class="ti ti-check"></i>';
-  setTimeout(() => btn.innerHTML = orig, 1500);
+  try {
+    navigator.clipboard.writeText(link).then(() => {
+      const orig = btn.innerHTML;
+      btn.innerHTML = '<i class="ti ti-check"></i>';
+      setTimeout(() => btn.innerHTML = orig, 1500);
+    }).catch(() => fallbackCopy(link, btn));
+  } catch(e){
+    fallbackCopy(link, btn);
+  }
 }
 
 async function revokeInvitation(id){
