@@ -28,7 +28,33 @@ body{font-family:'Manrope',sans-serif;background:var(--bg);color:var(--text);fon
 .hdr-title{font-size:15px;font-weight:700;color:var(--text)}
 .hdr-sub{font-size:11px;color:var(--muted);margin-top:1px}
 .hdr-r{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
-.hdr-user{padding:6px 12px;background:var(--blue-pale);color:var(--blue);border-radius:20px;font-weight:600;font-size:11px}
+.hdr-user{padding:6px 12px;background:var(--blue-pale);color:var(--blue);border-radius:20px;font-weight:600;font-size:11px;border:none;cursor:pointer;font-family:'Manrope',sans-serif;display:inline-flex;align-items:center}
+.hdr-user:hover{background:var(--blue-light)}
+.user-menu{position:relative}
+.user-dropdown{display:none;position:absolute;top:100%;right:0;margin-top:6px;background:white;border:0.5px solid var(--border);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.08);min-width:200px;z-index:200;overflow:hidden}
+.user-dropdown.show{display:block}
+.user-dropdown-item{padding:10px 14px;font-size:12px;color:var(--text);cursor:pointer;display:flex;align-items:center;gap:8px}
+.user-dropdown-item:hover{background:var(--bg)}
+.user-dropdown-item i{font-size:14px;color:var(--muted)}
+
+/* Modal */
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:300;align-items:center;justify-content:center;padding:24px}
+.modal-overlay.show{display:flex}
+.modal-box{background:white;border-radius:12px;max-width:400px;width:100%;padding:28px 26px}
+.modal-title{font-size:15px;font-weight:700;margin-bottom:4px}
+.modal-sub{font-size:12px;color:var(--muted);margin-bottom:20px}
+.modal-input{width:100%;padding:10px 12px;border:0.5px solid var(--border);border-radius:8px;font-family:'Manrope',sans-serif;font-size:13px;margin-bottom:10px;outline:none}
+.modal-input:focus{border-color:var(--blue)}
+.modal-actions{display:flex;gap:10px;margin-top:14px}
+.modal-btn{flex:1;padding:10px;border-radius:8px;font-family:'Manrope',sans-serif;font-size:13px;font-weight:600;cursor:pointer;border:none}
+.modal-btn-primary{background:var(--blue);color:white}
+.modal-btn-primary:disabled{opacity:0.6;cursor:not-allowed}
+.modal-btn-secondary{background:var(--surface);color:var(--text)}
+.modal-err{font-size:12px;color:var(--red);margin-top:10px;display:none}
+.modal-err.show{display:block}
+.modal-info{font-size:12px;color:var(--teal);margin-top:10px;display:none}
+.modal-info.show{display:block}
+.modal-hint{font-size:11px;color:var(--subtle);margin-top:4px;margin-bottom:6px}
 
 /* ── LAYOUT ── */
 .layout{display:grid;grid-template-columns:240px 1fr;min-height:calc(100vh - 60px)}
@@ -192,10 +218,39 @@ input:focus,textarea:focus,select:focus{border-color:var(--blue)}
     </div>
   </div>
   <div class="hdr-r">
-    <span>AMLCO:</span>
-    <span class="hdr-user">Sav Toumazou</span>
+    <div class="user-menu" id="user-menu">
+      <button class="hdr-user" id="user-pill" onclick="toggleUserMenu(event)">
+        <span id="user-email">Loading...</span>
+        <i class="ti ti-chevron-down" style="font-size:13px;margin-left:4px;vertical-align:-2px"></i>
+      </button>
+      <div class="user-dropdown" id="user-dropdown">
+        <div class="user-dropdown-item" onclick="openChangePassword()"><i class="ti ti-key"></i>Change password</div>
+        <div class="user-dropdown-item" onclick="logout()"><i class="ti ti-logout"></i>Sign out</div>
+      </div>
+    </div>
   </div>
 </header>
+
+<!-- ── CHANGE PASSWORD MODAL ── -->
+<div class="modal-overlay" id="change-pw-modal" onclick="closeChangePassword(event)">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-title">Change password</div>
+    <div class="modal-sub">Choose a new password for your account</div>
+
+    <input type="password" class="modal-input" id="cp-current" placeholder="Current password" autocomplete="current-password">
+    <input type="password" class="modal-input" id="cp-new" placeholder="New password" autocomplete="new-password">
+    <div class="modal-hint">Minimum 8 characters</div>
+    <input type="password" class="modal-input" id="cp-confirm" placeholder="Confirm new password" autocomplete="new-password">
+
+    <div class="modal-err" id="cp-err"></div>
+    <div class="modal-info" id="cp-info">Password updated successfully</div>
+
+    <div class="modal-actions">
+      <button class="modal-btn modal-btn-secondary" onclick="closeChangePassword()">Cancel</button>
+      <button class="modal-btn modal-btn-primary" id="cp-submit" onclick="changePassword()">Update password</button>
+    </div>
+  </div>
+</div>
 
 <div class="layout" style="display:none" id="main-layout">
 
@@ -215,7 +270,6 @@ input:focus,textarea:focus,select:focus{border-color:var(--blue)}
     <div class="nav-section">
       <div class="nav-label">System</div>
       <div class="nav-item" onclick="window.open('https://kyc.predeevo.com','_blank')"><i class="ti ti-external-link"></i>KYC form</div>
-      <div class="nav-item" onclick="logout()"><i class="ti ti-logout"></i>Sign out</div>
     </div>
   </aside>
 
@@ -478,11 +532,117 @@ async function logout(){
   window.location.reload();
 }
 
-function showApp(){
+async function showApp(){
   document.getElementById('login-gate').style.display = 'none';
   document.getElementById('main-hdr').style.display = 'flex';
   document.getElementById('main-layout').style.display = 'grid';
+
+  const { data: { user } } = await sb.auth.getUser();
+  if(user){
+    document.getElementById('user-email').textContent = user.email;
+  }
+
   loadAll();
+}
+
+// ── USER MENU DROPDOWN ──
+function toggleUserMenu(event){
+  if(event) event.stopPropagation();
+  document.getElementById('user-dropdown').classList.toggle('show');
+}
+
+document.addEventListener('click', () => {
+  document.getElementById('user-dropdown')?.classList.remove('show');
+});
+
+// ── CHANGE PASSWORD ──
+function openChangePassword(){
+  document.getElementById('user-dropdown').classList.remove('show');
+  document.getElementById('cp-current').value = '';
+  document.getElementById('cp-new').value = '';
+  document.getElementById('cp-confirm').value = '';
+  document.getElementById('cp-err').classList.remove('show');
+  document.getElementById('cp-info').classList.remove('show');
+  document.getElementById('cp-submit').disabled = false;
+  document.getElementById('cp-submit').textContent = 'Update password';
+  document.getElementById('change-pw-modal').classList.add('show');
+  setTimeout(() => document.getElementById('cp-current').focus(), 50);
+}
+
+function closeChangePassword(event){
+  if(event && event.target && !event.target.classList.contains('modal-overlay') && !event.target.classList.contains('modal-btn-secondary')) return;
+  document.getElementById('change-pw-modal').classList.remove('show');
+}
+
+async function changePassword(){
+  const current = document.getElementById('cp-current').value;
+  const newPw = document.getElementById('cp-new').value;
+  const confirm = document.getElementById('cp-confirm').value;
+  const err = document.getElementById('cp-err');
+  const info = document.getElementById('cp-info');
+  const btn = document.getElementById('cp-submit');
+
+  err.classList.remove('show');
+  info.classList.remove('show');
+
+  if(!current || !newPw || !confirm){
+    err.textContent = 'Please fill in all fields';
+    err.classList.add('show');
+    return;
+  }
+
+  if(newPw.length < 8){
+    err.textContent = 'New password must be at least 8 characters';
+    err.classList.add('show');
+    return;
+  }
+
+  if(newPw !== confirm){
+    err.textContent = 'New passwords do not match';
+    err.classList.add('show');
+    return;
+  }
+
+  if(newPw === current){
+    err.textContent = 'New password must be different from current password';
+    err.classList.add('show');
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Updating...';
+
+  const { data: { user } } = await sb.auth.getUser();
+  const { error: signInError } = await sb.auth.signInWithPassword({
+    email: user.email,
+    password: current
+  });
+
+  if(signInError){
+    err.textContent = 'Current password is incorrect';
+    err.classList.add('show');
+    btn.disabled = false;
+    btn.textContent = 'Update password';
+    return;
+  }
+
+  const { error: updateError } = await sb.auth.updateUser({ password: newPw });
+
+  if(updateError){
+    err.textContent = 'Could not update password: ' + updateError.message;
+    err.classList.add('show');
+    btn.disabled = false;
+    btn.textContent = 'Update password';
+    return;
+  }
+
+  info.textContent = 'Password updated successfully';
+  info.classList.add('show');
+  btn.textContent = 'Done';
+
+  setTimeout(() => {
+    document.getElementById('change-pw-modal').classList.remove('show');
+  }, 1500);
 }
 
 // Check if already authed
