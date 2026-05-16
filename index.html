@@ -161,6 +161,7 @@ input:focus,textarea:focus,select:focus{border-color:var(--blue)}
 .login-err.show{display:block}
 
 </style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
 
@@ -840,5 +841,11 @@ document.querySelectorAll('.modal-bg').forEach(m => {
 
 </script>
 
+<script>
+    const SUPABASE_URL = 'https://dnvmprywxeuzhjumtnpm.supabase.co';
+    const SUPABASE_KEY = 'sb_publishable_tzE7PAuqyuNl7w5FkkyRtA_Oj_6fhqu';
+    const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    console.log('Supabase client initialized:', supabaseClient);
+  </script>
 </body>
 </html>
