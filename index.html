@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Predeevo — Compliance Dashboard</title>
+<title>Predeevo App</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -213,7 +213,7 @@ input:focus,textarea:focus,select:focus{border-color:var(--blue)}
   <div class="hdr-l">
     <img src="https://predeevo.com/wp-content/uploads/2026/02/logo-1.png" class="hdr-logo" alt="Predeevo">
     <div>
-      <div class="hdr-title">Compliance Dashboard</div>
+      <div class="hdr-title">Predeevo App</div>
       <div class="hdr-sub">AML/CFT operations · ICPAC-regulated</div>
     </div>
   </div>
@@ -458,6 +458,7 @@ const KYC_FORM_URL = 'https://kyc.predeevo.com';
 // State
 let allSubmissions = [];
 let allInvitations = [];
+let currentUser = null;  // populated on session load; used for audit logging
 let allAudit = [];
 let subFilter = 'all';
 let invFilter = 'all';
@@ -539,6 +540,7 @@ async function showApp(){
 
   const { data: { user } } = await sb.auth.getUser();
   if(user){
+    currentUser = user;  // cache for audit log entries elsewhere
     document.getElementById('user-email').textContent = user.email;
   }
 
@@ -782,58 +784,148 @@ async function viewSubmission(id){
   const sub = allSubmissions.find(s => s.id === id);
   if(!sub) return;
 
-  // Load related data
-  const [shRes, sofRes, qRes] = await Promise.all([
+  // Load all related data in parallel
+  const [shRes, sofRes, qRes, docRes] = await Promise.all([
     sb.from('kyc_shareholders').select('*').eq('application_id', id),
     sb.from('kyc_source_of_funds').select('*').eq('application_id', id),
-    sb.from('kyc_questionnaire').select('*').eq('application_id', id)
+    sb.from('kyc_questionnaire').select('*').eq('application_id', id),
+    sb.from('kyc_documents').select('*').eq('application_id', id).order('created_at', {ascending: true}),
   ]);
   const shareholders = shRes.data || [];
   const sof = sofRes.data || [];
   const questions = qRes.data || [];
+  const docs = docRes.data || [];
 
   document.getElementById('detail-ref').textContent = sub.reference;
+
+  // Locate the applicant within shareholders for the canonical identity panel
+  const applicant = shareholders.find(s => s.is_applicant) || null;
+
+  // SoW data (if applicant is PEP)
+  const sowSources = sub.sow_sources && typeof sub.sow_sources === 'object' ? sub.sow_sources : null;
+  const sowKeyLabels = {
+    employment: 'Long-term employment / professional income',
+    business:   'Business ownership or sale of business',
+    inheritance:'Inheritance or family wealth',
+    property:   'Sale of property or other assets',
+    investments:'Investment returns over time',
+    other:      'Other'
+  };
+
+  // Helpers
+  const fmt    = v => v ?? '—';
+  const fmtEur = v => (v != null && v !== '') ? '€' + Number(v).toLocaleString('en-GB') : '—';
+  const fmtDate= v => v ? new Date(v).toLocaleDateString('en-GB') : '—';
+  const fmtBool= v => v === true ? '✓' : (v === false ? '✗' : '—');
 
   let html = `
     <div class="alert alert-info"><i class="ti ti-info-circle"></i>Submitted ${sub.submitted_at ? new Date(sub.submitted_at).toLocaleString('en-GB',{timeZone:'Europe/Nicosia'}) : '—'} · Status: <strong style="margin-left:4px">${(sub.status||'').replace('_',' ')}</strong></div>
 
-    <h3 style="font-size:13px;font-weight:700;margin:16px 0 8px">Applicant</h3>
+    <h3 style="font-size:13px;font-weight:700;margin:16px 0 8px">Applicant identity</h3>
     <div class="detail-grid">
-      <div class="detail-label">Full name</div><div class="detail-value">${sub.first_name||''} ${sub.surname||''}</div>
-      <div class="detail-label">Email</div><div class="detail-value">${sub.email || '—'}</div>
-      <div class="detail-label">Mobile</div><div class="detail-value">${sub.mobile || '—'}</div>
-      <div class="detail-label">DOB</div><div class="detail-value">${sub.dob || '—'}</div>
-      <div class="detail-label">Nationality</div><div class="detail-value">${sub.nationality || '—'}</div>
-      <div class="detail-label">PEP status</div><div class="detail-value">${sub.pep_status || '—'}</div>
-      <div class="detail-label">Tax country</div><div class="detail-value">${sub.tax_country || '—'}</div>
-      <div class="detail-label">Occupation</div><div class="detail-value">${sub.occupation || '—'}</div>
+      <div class="detail-label">Full name</div><div class="detail-value">${fmt(applicant?.full_name) || (sub.first_name||'') + ' ' + (sub.surname||'')}</div>
+      <div class="detail-label">Email</div><div class="detail-value">${fmt(applicant?.email || sub.email)}</div>
+      <div class="detail-label">Mobile</div><div class="detail-value">${(applicant?.mobile_country_code || '') + ' ' + fmt(applicant?.mobile || sub.mobile)}</div>
+      <div class="detail-label">Date of birth</div><div class="detail-value">${fmtDate(applicant?.dob || sub.dob)}</div>
+      <div class="detail-label">Place of birth</div><div class="detail-value">${fmt(applicant?.place_of_birth || sub.place_of_birth)}</div>
+      <div class="detail-label">Nationality</div><div class="detail-value">${fmt(applicant?.nationality || sub.nationality)}</div>
+      <div class="detail-label">Dual nationality</div><div class="detail-value">${fmt(applicant?.dual_nationality || sub.dual_nationality)}</div>
+      <div class="detail-label">Passport number</div><div class="detail-value">${fmt(applicant?.passport_number || sub.passport_number)}</div>
+      <div class="detail-label">Passport expiry</div><div class="detail-value">${fmtDate(applicant?.passport_expiry || sub.passport_expiry)}</div>
+      <div class="detail-label">ID card number</div><div class="detail-value">${fmt(applicant?.id_card_number || sub.id_card_number)}</div>
+      <div class="detail-label">ID card expiry</div><div class="detail-value">${fmtDate(applicant?.id_card_expiry || sub.id_card_expiry)}</div>
+      <div class="detail-label">Address</div><div class="detail-value">${fmt(applicant?.addr_street || sub.addr_street)}, ${fmt(applicant?.addr_town || sub.addr_town)}, ${fmt(applicant?.addr_postcode || sub.addr_postcode)}, ${fmt(applicant?.country_of_residence || sub.addr_country)}</div>
+      <div class="detail-label">Occupation</div><div class="detail-value">${fmt(applicant?.occupation || sub.occupation)}</div>
+      <div class="detail-label">Employment status</div><div class="detail-value">${fmt(applicant?.employment_status || sub.employment_status)}</div>
+      <div class="detail-label">Annual income</div><div class="detail-value">${fmt(applicant?.annual_income || sub.annual_income)}</div>
+      <div class="detail-label">Tax country</div><div class="detail-value">${fmt(applicant?.tax_country || sub.tax_country)}</div>
+      <div class="detail-label">TIN / AFM</div><div class="detail-value">${fmt(applicant?.tin || sub.tin)}</div>
+      <div class="detail-label">PEP status</div><div class="detail-value">${applicant?.pep_status === 'yes' ? '<span style="color:var(--amber);font-weight:700">⚠ Yes</span>' : fmt(applicant?.pep_status || sub.pep_status)}</div>
     </div>
 
-    <h3 style="font-size:13px;font-weight:700;margin:18px 0 8px">Engagement</h3>
+    <h3 style="font-size:13px;font-weight:700;margin:18px 0 8px">Engagement details</h3>
     <div class="detail-grid">
-      <div class="detail-label">Company name</div><div class="detail-value">${sub.company_name || sub.entity_name || '—'}</div>
-      <div class="detail-label">Services</div><div class="detail-value">${(sub.services||[]).join(', ') || '—'}</div>
-      <div class="detail-label">Principal activities</div><div class="detail-value">${sub.principal_activities || sub.entity_activities || '—'}</div>
-      <div class="detail-label">Turnover Y1</div><div class="detail-value">${sub.turnover_y1 ? '€' + sub.turnover_y1.toLocaleString() : '—'}</div>
+      <div class="detail-label">Services requested</div><div class="detail-value">${(sub.services||[]).join(', ') || '—'}</div>
+      <div class="detail-label">Other services</div><div class="detail-value">${fmt(sub.other_services_description)}</div>
+      <div class="detail-label">Introduced by</div><div class="detail-value">${fmt(sub.introduced_by)}</div>
+      <div class="detail-label">Proposed company name</div><div class="detail-value">${fmt(sub.company_name)}</div>
+      <div class="detail-label">Alternative name</div><div class="detail-value">${fmt(sub.alt_company_name)}</div>
+      <div class="detail-label">Company type</div><div class="detail-value">${fmt(sub.company_type)}</div>
+      <div class="detail-label">Country of incorporation</div><div class="detail-value">${fmt(sub.country_of_incorp)}</div>
+      <div class="detail-label">Entity name (existing)</div><div class="detail-value">${fmt(sub.entity_name)}</div>
+      <div class="detail-label">Entity reg number</div><div class="detail-value">${fmt(sub.entity_reg_number)}</div>
+      <div class="detail-label">Entity country</div><div class="detail-value">${fmt(sub.entity_country)}</div>
+      <div class="detail-label">Entity incorporation date</div><div class="detail-value">${fmtDate(sub.entity_incorporation_date)}</div>
+      <div class="detail-label">Principal activities</div><div class="detail-value">${fmt(sub.principal_activities || sub.entity_activities)}</div>
+      <div class="detail-label">Economic rationale</div><div class="detail-value">${fmt(sub.economic_rationale || sub.entity_rationale)}</div>
+      <div class="detail-label">Operating funds source</div><div class="detail-value">${fmt(sub.operating_funds_source)}</div>
+      <div class="detail-label">Countries of operation</div><div class="detail-value">${fmt(sub.countries_operation)}</div>
+      <div class="detail-label">Expected employees</div><div class="detail-value">${fmt(sub.expected_employees)}</div>
+      <div class="detail-label">Share capital</div><div class="detail-value">${fmtEur(sub.share_capital)}</div>
+      <div class="detail-label">Turnover Y1</div><div class="detail-value">${fmtEur(sub.turnover_y1 || sub.entity_turnover_y1)}</div>
+      <div class="detail-label">Turnover Y2</div><div class="detail-value">${fmtEur(sub.turnover_y2 || sub.entity_turnover_y2)}</div>
+      <div class="detail-label">Controlling person</div><div class="detail-value">${fmt(sub.controlling_person_id)}</div>
     </div>
 
     ${shareholders.length ? `
     <h3 style="font-size:13px;font-weight:700;margin:18px 0 8px">Shareholders & UBOs (${shareholders.length})</h3>
-    <table class="tbl" style="font-size:11.5px"><thead><tr><th>Name</th><th>%</th><th>UBO</th><th>Applicant</th></tr></thead>
-    <tbody>${shareholders.map(s => `<tr><td>${s.full_name}</td><td>${s.shareholding_pct || '—'}%</td><td>${s.is_ubo ? '✓' : ''}</td><td>${s.is_applicant ? '✓' : ''}</td></tr>`).join('')}</tbody></table>
+    <table class="tbl" style="font-size:11.5px"><thead><tr><th>Name</th><th>%</th><th>Type</th><th>Nationality</th><th>DOB</th><th>Passport</th><th>PEP</th><th>UBO</th><th>Applicant</th><th>KYC link</th></tr></thead>
+    <tbody>${shareholders.map(s => `
+      <tr>
+        <td>${fmt(s.full_name)}</td>
+        <td>${s.shareholding_pct != null ? s.shareholding_pct + '%' : '—'}</td>
+        <td>${fmt(s.ownership_type)}</td>
+        <td>${fmt(s.nationality)}</td>
+        <td>${fmtDate(s.dob)}</td>
+        <td>${fmt(s.passport_number)}</td>
+        <td>${s.pep_status === 'yes' ? '<span style="color:var(--amber);font-weight:700">⚠</span>' : (s.pep_status === 'no' ? '✗' : '—')}</td>
+        <td>${fmtBool(s.is_ubo)}</td>
+        <td>${fmtBool(s.is_applicant)}</td>
+        <td style="font-size:10px;color:var(--muted)">${s.kyc_status || '—'}</td>
+      </tr>`).join('')}</tbody></table>
     ` : ''}
 
     ${sof.length ? `
     <h3 style="font-size:13px;font-weight:700;margin:18px 0 8px">Source of funds</h3>
-    <table class="tbl" style="font-size:11.5px"><thead><tr><th>Type</th><th>Amount</th></tr></thead>
-    <tbody>${sof.map(s => `<tr><td>${s.sof_type}</td><td>${s.amount_eur ? '€' + s.amount_eur.toLocaleString() : '—'}</td></tr>`).join('')}</tbody></table>
+    <table class="tbl" style="font-size:11.5px"><thead><tr><th>Type</th><th>Amount</th><th>Description</th></tr></thead>
+    <tbody>${sof.map(s => `<tr><td>${fmt(s.sof_type)}</td><td>${fmtEur(s.amount_eur)}</td><td>${fmt(s.description)}</td></tr>`).join('')}
+    ${sof.length > 1 ? `<tr style="font-weight:700;background:var(--bg)"><td>Total declared</td><td>${fmtEur(sof.reduce((sum, s) => sum + (Number(s.amount_eur) || 0), 0))}</td><td></td></tr>` : ''}
+    </tbody></table>
     ` : ''}
 
-    <h3 style="font-size:13px;font-weight:700;margin:18px 0 8px">Compliance</h3>
+    ${sowSources ? `
+    <h3 style="font-size:13px;font-weight:700;margin:18px 0 8px">Source of wealth <span style="font-size:10px;color:var(--amber);background:var(--amber-light);padding:2px 8px;border-radius:10px;margin-left:6px">PEP / EDD</span></h3>
+    <table class="tbl" style="font-size:11.5px"><thead><tr><th>Category</th><th>Declared value</th></tr></thead>
+    <tbody>${Object.entries(sowSources).map(([k,v]) => `<tr><td>${sowKeyLabels[k] || k}${k === 'other' && sub.sow_other_description ? `<div style="font-size:10px;color:var(--muted);margin-top:2px">${sub.sow_other_description}</div>` : ''}</td><td>${fmtEur(v)}</td></tr>`).join('')}
+    <tr style="font-weight:700;background:var(--bg)"><td>Total declared wealth</td><td>${fmtEur(sub.sow_total_declared)}</td></tr>
+    </tbody></table>
+    ` : ''}
+
+    <h3 style="font-size:13px;font-weight:700;margin:18px 0 8px">Documents (${docs.length})</h3>
+    ${docs.length ? `
+    <table class="tbl" style="font-size:11.5px"><thead><tr><th>Type</th><th>File</th><th>Size</th><th>Uploaded</th><th style="width:160px;text-align:right">Actions</th></tr></thead>
+    <tbody>${docs.map(d => `
+      <tr>
+        <td>${(d.doc_type || '').replace(/_/g, ' ')}</td>
+        <td style="word-break:break-all">${fmt(d.file_name)}</td>
+        <td>${d.file_size ? (d.file_size / 1024 / 1024 < 1 ? Math.round(d.file_size/1024) + ' KB' : (d.file_size/1024/1024).toFixed(2) + ' MB') : '—'}</td>
+        <td>${fmtDate(d.created_at)}</td>
+        <td style="text-align:right;white-space:nowrap">
+          <button class="btn btn-outline btn-sm" onclick="viewDocument('${d.id}','${(d.file_name||'').replace(/'/g, '&#39;')}')" title="View document"><i class="ti ti-eye"></i></button>
+          <button class="btn btn-outline btn-sm" onclick="downloadDocument('${d.id}','${(d.file_name||'').replace(/'/g, '&#39;')}')" title="Download document" style="margin-left:4px"><i class="ti ti-download"></i></button>
+        </td>
+      </tr>`).join('')}</tbody></table>
+    ` : '<div class="tbl-empty"><i class="ti ti-file-off"></i>No documents uploaded</div>'}
+
+    <h3 style="font-size:13px;font-weight:700;margin:18px 0 8px">Compliance & verification</h3>
     <div class="detail-grid">
-      <div class="detail-label">Biometric ref</div><div class="detail-value">${sub.biometric_ref || '—'}</div>
-      <div class="detail-label">Biometric score</div><div class="detail-value">${sub.biometric_score ? sub.biometric_score + '%' : '—'}</div>
-      <div class="detail-label">Signature</div><div class="detail-value">${sub.sig_method || '—'}</div>
+      <div class="detail-label">Biometric ref</div><div class="detail-value">${fmt(sub.biometric_ref)}</div>
+      <div class="detail-label">Biometric score</div><div class="detail-value">${sub.biometric_score != null ? sub.biometric_score + '%' : '—'}</div>
+      <div class="detail-label">Biometric passed</div><div class="detail-value">${fmtBool(sub.biometric_passed)}</div>
+      <div class="detail-label">Signature method</div><div class="detail-value">${fmt(sub.sig_method)}</div>
+      <div class="detail-label">Signature reference</div><div class="detail-value">${fmt(sub.sig_reference)}</div>
+      <div class="detail-label">Evrotrust mobile</div><div class="detail-value">${(sub.evrotrust_mobile_country_code || '') + ' ' + fmt(sub.evrotrust_mobile)}</div>
+      <div class="detail-label">Physical appointment</div><div class="detail-value">${fmt(sub.physical_appointment_ref)}</div>
       <div class="detail-label">Questionnaire</div><div class="detail-value">${questions.length} answered (${questions.filter(q => q.answer === true).length} affirmative)</div>
     </div>
   `;
@@ -846,18 +938,85 @@ async function viewSubmission(id){
     <button class="btn btn-teal" onclick="updateSubmissionStatus('${id}','approved')">Approve</button>
   `;
   document.getElementById('modal-detail').classList.add('open');
+
+  // Stash so viewDocument can resolve docs by id without another fetch
+  window._currentDocs = docs;
+  window._currentAppId = id;
+}
+
+// ── DOCUMENT VIEWING / DOWNLOADING (signed URLs + audit log) ──
+// Creates a short-lived signed URL for a private storage object and opens/downloads it.
+// Every access is recorded in kyc_audit_log for compliance trail.
+
+const SIGNED_URL_TTL_SECONDS = 300;  // 5 minutes — long enough to view, short enough to prevent sharing
+
+async function _generateSignedDocUrl(docId, opts = {}){
+  const doc = (window._currentDocs || []).find(d => d.id === docId);
+  if(!doc){
+    alert('Document not found — please reopen the submission.');
+    return null;
+  }
+  if(!doc.storage_path){
+    alert('Document has no storage path — cannot generate access link.');
+    return null;
+  }
+  const { data, error } = await sb.storage
+    .from('kyc-documents')
+    .createSignedUrl(doc.storage_path, SIGNED_URL_TTL_SECONDS, opts);
+  if(error || !data){
+    console.error('Signed URL error:', error);
+    alert('Could not generate access link: ' + (error?.message || 'unknown error'));
+    return null;
+  }
+  return { url: data.signedUrl, doc };
+}
+
+async function _logDocAccess(doc, action){
+  try {
+    await sb.from('kyc_audit_log').insert({
+      application_id: doc.application_id,
+      event: action,                  // 'document_viewed' or 'document_downloaded'
+      details: {
+        document_id: doc.id,
+        doc_type: doc.doc_type,
+        file_name: doc.file_name,
+        by: currentUser?.email || 'unknown',
+        at: new Date().toISOString()
+      }
+    });
+  } catch(e){
+    console.warn('Could not write audit log entry (access still allowed):', e);
+  }
+}
+
+async function viewDocument(docId){
+  const res = await _generateSignedDocUrl(docId);
+  if(!res) return;
+  await _logDocAccess(res.doc, 'document_viewed');
+  // Open in a new tab — browser will inline-render PDFs/images
+  window.open(res.url, '_blank', 'noopener');
+}
+
+async function downloadDocument(docId, fileName){
+  // Pass download option so the signed URL forces Content-Disposition: attachment
+  const res = await _generateSignedDocUrl(docId, { download: fileName || true });
+  if(!res) return;
+  await _logDocAccess(res.doc, 'document_downloaded');
+  // Trigger download by navigating (the signed URL has download=true set)
+  window.location.href = res.url;
 }
 
 async function updateSubmissionStatus(id, newStatus){
+  const userLabel = currentUser?.email || 'unknown';
   const { error } = await sb.from('kyc_applications')
-    .update({ status: newStatus, co_decision_at: new Date().toISOString(), co_decision_by: 'Sav Toumazou' })
+    .update({ status: newStatus, co_decision_at: new Date().toISOString(), co_decision_by: userLabel })
     .eq('id', id);
   if(error){ alert('Update failed: ' + error.message); return; }
   // Audit
   await sb.from('kyc_audit_log').insert({
     application_id: id,
     event: 'status_changed',
-    details: { new_status: newStatus, by: 'Sav Toumazou' }
+    details: { new_status: newStatus, by: userLabel }
   });
   closeModal('modal-detail');
   await loadAll();
