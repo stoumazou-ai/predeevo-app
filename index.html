@@ -789,7 +789,7 @@ async function viewSubmission(id){
     sb.from('kyc_shareholders').select('*').eq('application_id', id),
     sb.from('kyc_source_of_funds').select('*').eq('application_id', id),
     sb.from('kyc_questionnaire').select('*').eq('application_id', id),
-    sb.from('kyc_documents').select('*').eq('application_id', id).order('created_at', {ascending: true}),
+    sb.from('kyc_documents').select('*').eq('application_id', id).order('uploaded_at', {ascending: true}),
   ]);
   const shareholders = shRes.data || [];
   const sof = sofRes.data || [];
@@ -909,7 +909,7 @@ async function viewSubmission(id){
         <td>${(d.doc_type || '').replace(/_/g, ' ')}</td>
         <td style="word-break:break-all">${fmt(d.file_name)}</td>
         <td>${d.file_size ? (d.file_size / 1024 / 1024 < 1 ? Math.round(d.file_size/1024) + ' KB' : (d.file_size/1024/1024).toFixed(2) + ' MB') : '—'}</td>
-        <td>${fmtDate(d.created_at)}</td>
+        <td>${fmtDate(d.uploaded_at)}</td>
         <td style="text-align:right;white-space:nowrap">
           <button class="btn btn-outline btn-sm" onclick="viewDocument('${d.id}','${(d.file_name||'').replace(/'/g, '&#39;')}')" title="View document"><i class="ti ti-eye"></i></button>
           <button class="btn btn-outline btn-sm" onclick="downloadDocument('${d.id}','${(d.file_name||'').replace(/'/g, '&#39;')}')" title="Download document" style="margin-left:4px"><i class="ti ti-download"></i></button>
