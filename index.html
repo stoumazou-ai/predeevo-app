@@ -144,6 +144,10 @@ body{font-family:'Manrope',sans-serif;background:var(--bg);color:var(--text);fon
 
 /* ── FORM FIELDS ── */
 .fg{margin-bottom:14px}
+.svc-chk{display:flex;align-items:center;gap:6px;padding:7px 10px;border:0.5px solid var(--border);border-radius:6px;font-size:12px;cursor:pointer;background:var(--card);user-select:none;transition:all .12s}
+.svc-chk:hover{border-color:var(--blue);background:var(--blue-pale)}
+.svc-chk input{width:13px;height:13px;cursor:pointer;flex-shrink:0;accent-color:var(--blue)}
+.svc-chk:has(input:checked){border-color:var(--blue);background:var(--blue-pale);color:var(--blue);font-weight:600}
 .lbl{display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:.03em}
 .req{color:var(--red)}
 input[type=text],input[type=email],input[type=date],textarea,select{width:100%;padding:9px 12px;border:0.5px solid var(--border);border-radius:8px;font-family:'Manrope',sans-serif;font-size:12.5px;outline:none;background:white;color:var(--text)}
@@ -388,15 +392,18 @@ input:focus,textarea:focus,select:focus{border-color:var(--blue)}
     </div>
     <div class="modal-body">
       <div id="invite-result" style="display:none">
-        <div class="alert alert-success"><i class="ti ti-circle-check"></i>Invitation created. Copy the link below and send it to your client.</div>
+        <div class="alert alert-success"><i class="ti ti-circle-check"></i><span id="invite-result-msg">Invitation created. Copy the link below and send it to your client.</span></div>
         <div class="lbl">Invitation link</div>
         <div class="link-box">
           <span class="link-url" id="invite-link"></span>
           <button class="btn btn-blue btn-sm" onclick="copyLink(this)"><i class="ti ti-copy"></i>Copy</button>
         </div>
-        <div class="alert alert-info"><i class="ti ti-info-circle"></i>This link is valid for 30 days and works only once. The client will see your firm's KYC form pre-filled with their details.</div>
+        <div class="alert alert-info"><i class="ti ti-info-circle"></i>This link is unique to the client. Once they open it, their KYC form will be pre-filled with the engagement context you set below.</div>
       </div>
       <div id="invite-form">
+
+        <!-- ── SECTION 1: CLIENT INFO ── -->
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--blue);letter-spacing:.3px;margin-bottom:8px;border-bottom:0.5px solid var(--blue-border);padding-bottom:5px">Client</div>
         <div class="fg">
           <label class="lbl">Client name <span class="req">*</span></label>
           <input type="text" id="inv-name" placeholder="Full name of the applicant">
@@ -407,14 +414,68 @@ input:focus,textarea:focus,select:focus{border-color:var(--blue)}
         </div>
         <div class="fg">
           <label class="lbl">Company / Entity name</label>
-          <input type="text" id="inv-company" placeholder="Company name (optional)">
+          <input type="text" id="inv-company" placeholder="e.g. Acme Trading Ltd (optional)">
         </div>
+
+        <!-- ── SECTION 2: ENGAGEMENT CONTEXT ── -->
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--blue);letter-spacing:.3px;margin:18px 0 8px;border-bottom:0.5px solid var(--blue-border);padding-bottom:5px">Engagement context</div>
+        <div style="font-size:11.5px;color:var(--muted);margin-bottom:10px;line-height:1.55">Pre-configure what the client sees. They can still edit anything you set.</div>
+
+        <div class="fg">
+          <label class="lbl">Services to be engaged</label>
+          <div id="inv-services" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:4px">
+            <label class="svc-chk"><input type="checkbox" value="incorp">Company incorporation</label>
+            <label class="svc-chk"><input type="checkbox" value="accounting">Accounting &amp; bookkeeping</label>
+            <label class="svc-chk"><input type="checkbox" value="tax">Tax advisory &amp; compliance</label>
+            <label class="svc-chk"><input type="checkbox" value="payroll">Payroll services</label>
+            <label class="svc-chk"><input type="checkbox" value="audit">Audit &amp; assurance</label>
+            <label class="svc-chk"><input type="checkbox" value="admin">Company administration</label>
+            <label class="svc-chk"><input type="checkbox" value="director">Director / nominee</label>
+            <label class="svc-chk"><input type="checkbox" value="trust">Trust &amp; foundation</label>
+            <label class="svc-chk"><input type="checkbox" value="regoffice">Registered office</label>
+            <label class="svc-chk"><input type="checkbox" value="other">Other</label>
+          </div>
+          <div style="font-size:10.5px;color:var(--muted);margin-top:6px">If none selected, the client picks their own services.</div>
+        </div>
+
+        <div class="fg">
+          <label class="lbl">Entity type</label>
+          <div style="display:flex;gap:8px;margin-top:4px">
+            <label class="svc-chk" style="flex:1"><input type="radio" name="inv-entity-type" value="">Client chooses</label>
+            <label class="svc-chk" style="flex:1"><input type="radio" name="inv-entity-type" value="incorp">New incorporation</label>
+            <label class="svc-chk" style="flex:1"><input type="radio" name="inv-entity-type" value="entity">Existing entity</label>
+          </div>
+        </div>
+
+        <div class="fg">
+          <label class="lbl">Pre-fill company name <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
+          <input type="text" id="inv-prefill-company" placeholder="e.g. Acme Trading Ltd">
+          <div style="font-size:10.5px;color:var(--muted);margin-top:4px">For "we already discussed setting up X Ltd" cases.</div>
+        </div>
+
+        <div class="fg">
+          <label class="lbl">Introduced by <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
+          <input type="text" id="inv-prefill-introduced" placeholder="e.g. John Smith, Jones &amp; Co">
+        </div>
+
+        <div class="fg">
+          <label class="lbl">Language</label>
+          <div style="display:flex;gap:8px;margin-top:4px">
+            <label class="svc-chk" style="flex:1"><input type="radio" name="inv-language" value="en" checked>English</label>
+            <label class="svc-chk" style="flex:1"><input type="radio" name="inv-language" value="el">Ελληνικά (Greek)</label>
+          </div>
+          <div style="font-size:10.5px;color:var(--muted);margin-top:4px">Greek translation coming soon — column captured for future use.</div>
+        </div>
+
+        <!-- ── SECTION 3: INTERNAL ── -->
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--blue);letter-spacing:.3px;margin:18px 0 8px;border-bottom:0.5px solid var(--blue-border);padding-bottom:5px">Internal</div>
+
         <div class="fg">
           <label class="lbl">Link validity period</label>
           <select id="inv-expiry-days">
             <option value="7">7 days</option>
-            <option value="14">14 days</option>
-            <option value="30" selected>30 days (default)</option>
+            <option value="14" selected>14 days (default)</option>
+            <option value="30">30 days</option>
             <option value="60">60 days</option>
             <option value="90">90 days</option>
             <option value="180">6 months</option>
@@ -427,9 +488,10 @@ input:focus,textarea:focus,select:focus{border-color:var(--blue)}
         </div>
       </div>
     </div>
-    <div class="modal-foot">
+    <div class="modal-foot" id="invite-foot-buttons">
       <button class="btn btn-outline" onclick="closeModal('modal-invite')" id="invite-close-btn">Cancel</button>
-      <button class="btn btn-blue" onclick="createInvitation()" id="invite-submit-btn"><i class="ti ti-send"></i>Create invitation</button>
+      <button class="btn btn-outline" onclick="createInvitation(false)" id="invite-submit-email-btn"><i class="ti ti-mail"></i>Create + Send email</button>
+      <button class="btn btn-blue" onclick="createInvitation(true)" id="invite-submit-btn"><i class="ti ti-copy"></i>Create + Copy link</button>
     </div>
   </div>
 </div>
@@ -1084,51 +1146,129 @@ function openNewInvitation(){
   document.getElementById('inv-email').value = '';
   document.getElementById('inv-company').value = '';
   document.getElementById('inv-notes').value = '';
-  document.getElementById('inv-expiry-days').value = '30';
+  document.getElementById('inv-expiry-days').value = '14';
+  document.getElementById('inv-prefill-company').value = '';
+  document.getElementById('inv-prefill-introduced').value = '';
+  // Uncheck all services
+  document.querySelectorAll('#inv-services input[type=checkbox]').forEach(cb => cb.checked = false);
+  // Reset entity type to "client chooses"
+  document.querySelectorAll('input[name="inv-entity-type"]').forEach(r => r.checked = false);
+  const defaultEntity = document.querySelector('input[name="inv-entity-type"][value=""]');
+  if(defaultEntity) defaultEntity.checked = true;
+  // Reset language to English
+  const enLang = document.querySelector('input[name="inv-language"][value="en"]');
+  if(enLang) enLang.checked = true;
+  // Reset modal state
   document.getElementById('invite-result').style.display = 'none';
   document.getElementById('invite-form').style.display = 'block';
   document.getElementById('invite-submit-btn').style.display = 'inline-flex';
+  document.getElementById('invite-submit-email-btn').style.display = 'inline-flex';
   document.getElementById('invite-close-btn').textContent = 'Cancel';
   document.getElementById('modal-invite').classList.add('open');
 }
 
-async function createInvitation(){
-  const name = document.getElementById('inv-name').value.trim();
-  const email = document.getElementById('inv-email').value.trim();
-  const company = document.getElementById('inv-company').value.trim();
-  const notes = document.getElementById('inv-notes').value.trim();
+// Reads all the form fields and returns the invitation payload.
+function _buildInvitationPayload(){
+  const name        = document.getElementById('inv-name').value.trim();
+  const email       = document.getElementById('inv-email').value.trim();
+  const company     = document.getElementById('inv-company').value.trim();
+  const notes       = document.getElementById('inv-notes').value.trim();
+  const expiryDays  = parseInt(document.getElementById('inv-expiry-days').value) || 14;
+  const services    = Array.from(document.querySelectorAll('#inv-services input[type=checkbox]:checked')).map(cb => cb.value);
+  const entityType  = document.querySelector('input[name="inv-entity-type"]:checked')?.value || null;
+  const prefillCo   = document.getElementById('inv-prefill-company').value.trim();
+  const prefillBy   = document.getElementById('inv-prefill-introduced').value.trim();
+  const language    = document.querySelector('input[name="inv-language"]:checked')?.value || 'en';
 
-  if(!name || !email){ alert('Client name and email are required'); return; }
+  if(!name || !email) return { error: 'Client name and email are required' };
 
-  const btn = document.getElementById('invite-submit-btn');
-  btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader"></i>Creating...';
+  return {
+    payload: {
+      client_name:              name,
+      client_email:             email,
+      client_company:           company || null,
+      notes:                    notes || null,
+      created_by:               currentUser?.email || 'unknown',
+      expires_at:               new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000).toISOString(),
+      services:                 services.length ? services : null,
+      entity_type:              entityType || null,
+      pre_filled_company_name:  prefillCo || null,
+      pre_filled_introduced_by: prefillBy || null,
+      language:                 language,
+    }
+  };
+}
+
+// Creates the invitation. If sendEmail=false, also calls kyc-invitation-email edge function.
+// Note: name is inverted from button label — copy-link button passes copyLinkOnly=true,
+// email button passes copyLinkOnly=false. Renamed param for clarity.
+async function createInvitation(copyLinkOnly){
+  const built = _buildInvitationPayload();
+  if(built.error){ alert(built.error); return; }
+
+  const linkBtn  = document.getElementById('invite-submit-btn');
+  const emailBtn = document.getElementById('invite-submit-email-btn');
+  const activeBtn = copyLinkOnly ? linkBtn : emailBtn;
+  const otherBtn  = copyLinkOnly ? emailBtn : linkBtn;
+  activeBtn.disabled = true;
+  otherBtn.disabled = true;
+  activeBtn.innerHTML = '<i class="ti ti-loader"></i>Creating...';
 
   try {
-    const expiryDays = parseInt(document.getElementById('inv-expiry-days').value) || 30;
-    const expiresAt = new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000).toISOString();
-
-    const { data, error } = await sb.from('kyc_invitations').insert({
-      client_name: name,
-      client_email: email,
-      client_company: company || null,
-      notes: notes || null,
-      created_by: 'Sav Toumazou',
-      expires_at: expiresAt
-    }).select().single();
-
+    // 1. Insert the invitation
+    const { data, error } = await sb.from('kyc_invitations').insert(built.payload).select().single();
     if(error) throw error;
 
+    let resultMsg = 'Invitation created. Copy the link below and send it to your client.';
+
+    // 2. If user clicked "Create + Send email", invoke the edge function
+    if(!copyLinkOnly){
+      try {
+        const fnUrl = SUPABASE_URL + '/functions/v1/kyc-invitation-email';
+        const resp = await fetch(fnUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + SUPABASE_ANON_KEY,
+            'apikey': SUPABASE_ANON_KEY,
+          },
+          body: JSON.stringify({ invitation_id: data.id })
+        });
+        const emailData = await resp.json().catch(() => ({}));
+        if(resp.ok && emailData.ok){
+          resultMsg = `Invitation sent to ${data.client_email}.`;
+        } else {
+          console.warn('Invitation email failed:', emailData);
+          resultMsg = 'Invitation created but email sending failed — please copy the link manually below.';
+        }
+      } catch(emailErr){
+        console.warn('Invitation email exception:', emailErr);
+        resultMsg = 'Invitation created but email sending failed — please copy the link manually below.';
+      }
+    }
+
+    // 3. Show result
     const link = `${KYC_FORM_URL}?token=${data.token}`;
     document.getElementById('invite-link').textContent = link;
+    document.getElementById('invite-result-msg').textContent = resultMsg;
     document.getElementById('invite-form').style.display = 'none';
     document.getElementById('invite-result').style.display = 'block';
     document.getElementById('invite-submit-btn').style.display = 'none';
+    document.getElementById('invite-submit-email-btn').style.display = 'none';
     document.getElementById('invite-close-btn').textContent = 'Done';
+
+    // 4. Auto-copy to clipboard if user picked the Copy Link option
+    if(copyLinkOnly){
+      try { await navigator.clipboard.writeText(link); } catch(_){}
+    }
 
     await loadInvitations();
   } catch(e){
     alert('Failed to create invitation: ' + e.message);
-    btn.disabled = false; btn.innerHTML = '<i class="ti ti-send"></i>Create invitation';
+    activeBtn.disabled = false;
+    otherBtn.disabled = false;
+    linkBtn.innerHTML  = '<i class="ti ti-copy"></i>Create + Copy link';
+    emailBtn.innerHTML = '<i class="ti ti-mail"></i>Create + Send email';
   }
 }
 
