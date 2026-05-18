@@ -1127,7 +1127,7 @@ function renderInvitations(){
         <td style="white-space:nowrap">
           ${i.status === 'pending' ? `
             <button class="btn btn-outline btn-sm" onclick="copyInviteLink('${i.token}', this)" title="Copy link"><i class="ti ti-copy"></i></button>
-            <button class="btn btn-outline btn-sm" onclick="editInvitation('${i.id}')" title="Edit invitation" style="margin-left:4px"><i class="ti ti-edit"></i></button>
+            ${!i.sent_at ? `<button class="btn btn-outline btn-sm" onclick="editInvitation('${i.id}')" title="Edit invitation" style="margin-left:4px"><i class="ti ti-edit"></i></button>` : ''}
             <button class="btn btn-outline btn-sm" onclick="revokeInvitation('${i.id}')" title="Revoke" style="color:var(--red);margin-left:4px"><i class="ti ti-x"></i></button>
           ` : `
             <button class="btn btn-outline btn-sm" onclick="copyInviteLink('${i.token}', this)" title="Copy link"><i class="ti ti-copy"></i></button>
@@ -1331,8 +1331,8 @@ async function sendInvitationEmailNow(){
 async function editInvitation(invitationId){
   const inv = allInvitations.find(i => i.id === invitationId);
   if(!inv){ alert('Invitation not found'); return; }
-  if(inv.status !== 'pending'){
-    alert('Only pending invitations can be edited. This invitation has already been sent or used.');
+  if(inv.status !== 'pending' || inv.sent_at){
+    alert('Only pending invitations that have not been emailed yet can be edited. Discard and create a new invitation instead.');
     return;
   }
 
