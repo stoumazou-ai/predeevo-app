@@ -959,33 +959,72 @@ async function viewSubmission(id){
     </tbody></table>
     ` : ''}
 
-    <h3 style="font-size:13px;font-weight:700;margin:18px 0 8px">Documents (${docs.length})</h3>
-    ${docs.length ? `
-    <table class="tbl" style="font-size:11.5px"><thead><tr><th>Type</th><th>File</th><th>Size</th><th>Uploaded</th><th style="width:160px;text-align:right">Actions</th></tr></thead>
-    <tbody>${docs.map(d => `
-      <tr>
-        <td>${(d.doc_type || '').replace(/_/g, ' ')}</td>
-        <td style="word-break:break-all">${fmt(d.file_name)}</td>
-        <td>${d.file_size ? (d.file_size / 1024 / 1024 < 1 ? Math.round(d.file_size/1024) + ' KB' : (d.file_size/1024/1024).toFixed(2) + ' MB') : '—'}</td>
-        <td>${fmtDate(d.uploaded_at)}</td>
-        <td style="text-align:right;white-space:nowrap">
-          <button class="btn btn-outline btn-sm" onclick="viewDocument('${d.id}','${(d.file_name||'').replace(/'/g, '&#39;')}')" title="View document"><i class="ti ti-eye"></i></button>
-          <button class="btn btn-outline btn-sm" onclick="downloadDocument('${d.id}','${(d.file_name||'').replace(/'/g, '&#39;')}')" title="Download document" style="margin-left:4px"><i class="ti ti-download"></i></button>
-        </td>
-      </tr>`).join('')}</tbody></table>
-    ` : '<div class="tbl-empty"><i class="ti ti-file-off"></i>No documents uploaded</div>'}
+    ${(() => {
+      // ── Identity verification: manual face match panel ──
+      // The applicant uploads a selfie in Step 4 of the KYC form. There's no third-party
+      // biometric API — the compliance officer compares this selfie to the ID document
+      // photo here. Both images are previewed inline via short-lived signed URLs (5 min TTL).
+      const selfieDoc = docs.find(d => d.doc_type === 'identity_selfie');
+      const idDoc     = docs.find(d => d.doc_type === 'passport') ||
+                        docs.find(d => d.doc_type === 'id_card');
+      return `
+      <h3 style="font-size:13px;font-weight:700;margin:18px 0 8px">Identity verification — manual face match required</h3>
+      <div style="border:0.5px solid var(--blue-border);background:var(--blue-pale);border-radius:10px;padding:14px;margin-bottom:14px">
+        <div style="font-size:11.5px;color:var(--muted);margin-bottom:12px;line-height:1.5;display:flex;align-items:flex-start;gap:6px">
+          <i class="ti ti-eye-search" style="font-size:14px;color:var(--blue);flex-shrink:0;margin-top:1px"></i>
+          <span>Compare the applicant's selfie to the photo on their ID document below. If the faces don't match, reject the submission or request enhanced due diligence. Click either image to open the full-size original in a new tab (audit-logged).</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+          <div>
+            <div style="font-size:11px;font-weight:600;color:var(--text);margin-bottom:6px;display:flex;align-items:center;gap:5px"><i class="ti ti-id" style="font-size:13px;color:var(--blue)"></i>ID document photo</div>
+            <div id="iv-id-slot" data-doc-id="${idDoc ? idDoc.id : ''}" style="height:240px;background:#f3f4f6;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--muted);overflow:hidden;${idDoc ? 'cursor:pointer' : ''}" ${idDoc ? `onclick="viewDocument('${idDoc.id}')"` : ''}>
+              ${idDoc ? 'Loading preview…' : '<span><i class="ti ti-file-off" style="font-size:18px;display:block;margin-bottom:4px"></i>No ID document uploaded</span>'}
+            </div>
+            ${idDoc ? `<div style="font-size:10px;color:var(--muted);margin-top:5px;word-break:break-all">${fmt(idDoc.file_name)} · ${(idDoc.doc_type||'').replace(/_/g,' ')}</div>` : ''}
+          </div>
+          <div>
+            <div style="font-size:11px;font-weight:600;color:var(--text);margin-bottom:6px;display:flex;align-items:center;gap:5px"><i class="ti ti-camera-selfie" style="font-size:13px;color:var(--blue)"></i>Applicant selfie</div>
+            <div id="iv-selfie-slot" data-doc-id="${selfieDoc ? selfieDoc.id : ''}" style="height:240px;background:#f3f4f6;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--muted);overflow:hidden;${selfieDoc ? 'cursor:pointer' : ''}" ${selfieDoc ? `onclick="viewDocument('${selfieDoc.id}')"` : ''}>
+              ${selfieDoc ? 'Loading preview…' : '<span><i class="ti ti-camera-off" style="font-size:18px;display:block;margin-bottom:4px"></i>No selfie uploaded</span>'}
+            </div>
+            ${selfieDoc ? `<div style="font-size:10px;color:var(--muted);margin-top:5px;word-break:break-all">${fmt(selfieDoc.file_name)} · uploaded ${fmtDate(selfieDoc.uploaded_at)}</div>` : ''}
+          </div>
+        </div>
+      </div>`;
+    })()}
+
+    <h3 style="font-size:13px;font-weight:700;margin:18px 0 8px">Documents (${docs.filter(d => d.doc_type !== 'identity_selfie').length})</h3>
+    ${(() => {
+      // Hide the selfie from the regular Documents listing — it's already represented in the
+      // Identity verification card above. ID docs remain in both places (useful in the table
+      // for file-management purposes).
+      const tableDocs = docs.filter(d => d.doc_type !== 'identity_selfie');
+      return tableDocs.length ? `
+      <table class="tbl" style="font-size:11.5px"><thead><tr><th>Type</th><th>File</th><th>Size</th><th>Uploaded</th><th style="width:160px;text-align:right">Actions</th></tr></thead>
+      <tbody>${tableDocs.map(d => `
+        <tr>
+          <td>${(d.doc_type || '').replace(/_/g, ' ')}</td>
+          <td style="word-break:break-all">${fmt(d.file_name)}</td>
+          <td>${d.file_size ? (d.file_size / 1024 / 1024 < 1 ? Math.round(d.file_size/1024) + ' KB' : (d.file_size/1024/1024).toFixed(2) + ' MB') : '—'}</td>
+          <td>${fmtDate(d.uploaded_at)}</td>
+          <td style="text-align:right;white-space:nowrap">
+            <button class="btn btn-outline btn-sm" onclick="viewDocument('${d.id}','${(d.file_name||'').replace(/'/g, '&#39;')}')" title="View document"><i class="ti ti-eye"></i></button>
+            <button class="btn btn-outline btn-sm" onclick="downloadDocument('${d.id}','${(d.file_name||'').replace(/'/g, '&#39;')}')" title="Download document" style="margin-left:4px"><i class="ti ti-download"></i></button>
+          </td>
+        </tr>`).join('')}</tbody></table>
+      ` : '<div class="tbl-empty"><i class="ti ti-file-off"></i>No documents uploaded</div>';
+    })()}
 
     <h3 style="font-size:13px;font-weight:700;margin:18px 0 8px">Compliance & verification</h3>
     <div class="detail-grid">
-      <div class="detail-label">Biometric ref</div><div class="detail-value">${fmt(sub.biometric_ref)}</div>
-      <div class="detail-label">Biometric score</div><div class="detail-value">${sub.biometric_score != null ? sub.biometric_score + '%' : '—'}</div>
-      <div class="detail-label">Biometric passed</div><div class="detail-value">${fmtBool(sub.biometric_passed)}</div>
+      <div class="detail-label">Identity selfie</div><div class="detail-value">${(docs.find(d => d.doc_type === 'identity_selfie')) ? '✓ Uploaded — see manual face-match panel above' : '✗ Not uploaded'}</div>
       <div class="detail-label">Signature method</div><div class="detail-value">${fmt(sub.sig_method)}</div>
       <div class="detail-label">Signature reference</div><div class="detail-value">${fmt(sub.sig_reference)}</div>
-      <div class="detail-label">Evrotrust mobile</div><div class="detail-value">${(sub.evrotrust_mobile_country_code || '') + ' ' + fmt(sub.evrotrust_mobile)}</div>
       <div class="detail-label">Physical appointment</div><div class="detail-value">${fmt(sub.physical_appointment_ref)}</div>
       <div class="detail-label">Questionnaire</div><div class="detail-value">${questions.length} answered (${questions.filter(q => q.answer === true).length} affirmative)</div>
     </div>
+    <!-- Removed 2026-06-01: Biometric ref/score/passed (always NULL — no third-party biometric API; see manual face-match panel above) -->
+    <!-- Removed 2026-06-01: Evrotrust mobile row (Evrotrust QES path was removed from the KYC form in May 2026) -->
   `;
 
   document.getElementById('detail-body').innerHTML = html;
@@ -1000,6 +1039,43 @@ async function viewSubmission(id){
   // Stash so viewDocument can resolve docs by id without another fetch
   window._currentDocs = docs;
   window._currentAppId = id;
+
+  // ── Async-load inline previews for the manual face-match panel ──
+  // We can't embed images via createSignedUrl synchronously inside the HTML template
+  // string above (Supabase calls are async). So we render placeholder slots first and
+  // then populate them here, after the modal is in the DOM.
+  _populateFaceMatchSlot('iv-id-slot');
+  _populateFaceMatchSlot('iv-selfie-slot');
+}
+
+// Helper for the manual face-match panel — generates a 5-minute signed URL for the doc
+// referenced by data-doc-id on the given slot, then swaps the placeholder text for an <img>.
+async function _populateFaceMatchSlot(slotId){
+  const slot = document.getElementById(slotId);
+  if(!slot) return;
+  const docId = slot.dataset.docId;
+  if(!docId) return;
+  const doc = (window._currentDocs || []).find(d => d.id === docId);
+  if(!doc || !doc.storage_path){
+    slot.innerHTML = '<span style="color:var(--muted);font-size:11px">Preview unavailable</span>';
+    return;
+  }
+  // PDFs don't render as <img> — show a "PDF — click to open" placeholder instead.
+  const isPdf = /\.pdf$/i.test(doc.file_name || '') || /pdf/i.test(doc.mime_type || '');
+  if(isPdf){
+    slot.innerHTML = '<div style="text-align:center;padding:14px"><i class="ti ti-file-type-pdf" style="font-size:34px;color:var(--blue);display:block;margin-bottom:6px"></i><div style="font-size:11px;font-weight:600;color:var(--text)">PDF document</div><div style="font-size:10px;color:var(--muted);margin-top:3px">Click to open in new tab</div></div>';
+    return;
+  }
+  try {
+    const { data, error } = await sb.storage
+      .from('kyc-documents')
+      .createSignedUrl(doc.storage_path, SIGNED_URL_TTL_SECONDS);
+    if(error || !data){ throw error || new Error('No signed URL returned'); }
+    slot.innerHTML = `<img src="${data.signedUrl}" alt="Preview" style="max-width:100%;max-height:100%;object-fit:contain;display:block">`;
+  } catch(e){
+    console.warn('Face-match slot signed URL error:', e);
+    slot.innerHTML = '<span style="color:var(--muted);font-size:11px">Preview failed to load — click to open</span>';
+  }
 }
 
 // ── DOCUMENT VIEWING / DOWNLOADING (signed URLs + audit log) ──
