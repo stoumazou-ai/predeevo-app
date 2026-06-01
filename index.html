@@ -479,6 +479,13 @@ input:focus,textarea:focus,select:focus{border-color:var(--blue)}
           <div style="font-size:10.5px;color:var(--muted);margin-top:4px">After this period the link stops working and the client will need a new one.</div>
         </div>
         <div class="fg">
+          <label class="lbl">Identity selfie (Step 4)</label>
+          <label class="svc-chk" style="display:flex;align-items:flex-start;gap:9px;margin-top:4px;cursor:pointer">
+            <input type="checkbox" id="inv-require-selfie" checked style="width:15px;height:15px;accent-color:var(--blue);margin-top:2px;flex-shrink:0">
+            <span style="font-size:11.5px;line-height:1.45"><strong>Require identity selfie via live camera</strong><br><span style="color:var(--muted);font-size:10.5px">When checked, the client must capture a selfie using their device camera in Step 4 (no file upload allowed) and the compliance officer reviews the face match against their ID document. <strong>Uncheck if you are meeting the client in person</strong> and verifying identity face-to-face &mdash; Step 4 will be skipped from the flow.</span></span>
+          </label>
+        </div>
+        <div class="fg">
           <label class="lbl">Internal notes</label>
           <textarea id="inv-notes" rows="2" placeholder="Optional notes for your team"></textarea>
         </div>
@@ -964,9 +971,22 @@ async function viewSubmission(id){
       // The applicant uploads a selfie in Step 4 of the KYC form. There's no third-party
       // biometric API — the compliance officer compares this selfie to the ID document
       // photo here. Both images are previewed inline via short-lived signed URLs (5 min TTL).
+      // When the AMLCO set require_selfie=false on the invitation (client met in person),
+      // we render an "in-person verification" notice instead of the dual-image comparison.
       const selfieDoc = docs.find(d => d.doc_type === 'identity_selfie');
       const idDoc     = docs.find(d => d.doc_type === 'passport') ||
                         docs.find(d => d.doc_type === 'id_card');
+      const linkedInv = (sub.current_invitation_id && Array.isArray(allInvitations))
+        ? allInvitations.find(i => i.id === sub.current_invitation_id) : null;
+      const selfieWasRequired = !linkedInv || linkedInv.require_selfie !== false;
+      if(!selfieWasRequired){
+        return `
+      <h3 style="font-size:13px;font-weight:700;margin:18px 0 8px">Identity verification — applicant verified in person</h3>
+      <div style="border:0.5px solid var(--blue-border);background:var(--blue-pale);border-radius:10px;padding:14px;margin-bottom:14px;display:flex;align-items:flex-start;gap:10px">
+        <i class="ti ti-user-check" style="font-size:20px;color:var(--blue);flex-shrink:0;margin-top:1px"></i>
+        <div style="font-size:11.5px;line-height:1.55;color:var(--text)"><strong>No identity selfie was requested for this invitation.</strong><br><span style="color:var(--muted)">The AMLCO opted to verify this client's identity face-to-face. Identity confirmation is documented offline. The ID document(s) uploaded in Step 3 remain available below for the file record.</span></div>
+      </div>`;
+      }
       return `
       <h3 style="font-size:13px;font-weight:700;margin:18px 0 8px">Identity verification — manual face match required</h3>
       <div style="border:0.5px solid var(--blue-border);background:var(--blue-pale);border-radius:10px;padding:14px;margin-bottom:14px">
@@ -1017,7 +1037,12 @@ async function viewSubmission(id){
 
     <h3 style="font-size:13px;font-weight:700;margin:18px 0 8px">Compliance & verification</h3>
     <div class="detail-grid">
-      <div class="detail-label">Identity selfie</div><div class="detail-value">${(docs.find(d => d.doc_type === 'identity_selfie')) ? '✓ Uploaded — see manual face-match panel above' : '✗ Not uploaded'}</div>
+      <div class="detail-label">Identity selfie</div><div class="detail-value">${(() => {
+        const linkedInv = (sub.current_invitation_id && Array.isArray(allInvitations))
+          ? allInvitations.find(i => i.id === sub.current_invitation_id) : null;
+        if(linkedInv && linkedInv.require_selfie === false) return 'Not required — applicant verified in person';
+        return (docs.find(d => d.doc_type === 'identity_selfie')) ? '✓ Uploaded — see manual face-match panel above' : '✗ Not uploaded';
+      })()}</div>
       <div class="detail-label">Signature method</div><div class="detail-value">${fmt(sub.sig_method)}</div>
       <div class="detail-label">Signature reference</div><div class="detail-value">${fmt(sub.sig_reference)}</div>
       <div class="detail-label">Physical appointment</div><div class="detail-value">${fmt(sub.physical_appointment_ref)}</div>
@@ -1194,7 +1219,7 @@ function renderInvitations(){
     <thead><tr><th>Client</th><th>Email</th><th>Company</th><th>Created</th><th>Expires</th><th>Status</th><th></th></tr></thead>
     <tbody>${filtered.map(i => `
       <tr>
-        <td><strong>${i.client_name || '—'}</strong></td>
+        <td><strong>${i.client_name || '—'}</strong>${i.require_selfie === false ? ' <span title="Selfie not required — client met in person" style="font-size:9.5px;font-weight:600;padding:1px 6px;border-radius:9px;background:var(--blue-pale);color:var(--blue);margin-left:4px;vertical-align:middle">in-person</span>' : ''}</td>
         <td>${i.client_email || '—'}</td>
         <td>${i.client_company || '—'}</td>
         <td>${new Date(i.created_at).toLocaleDateString('en-GB')}</td>
@@ -1245,6 +1270,9 @@ function openNewInvitation(){
   // Default language = English
   const enLang = document.querySelector('input[name="inv-language"][value="en"]');
   if(enLang) enLang.checked = true;
+  // Default require_selfie = true (most clients are remote; AMLCO unchecks for in-person meetings)
+  const reqSelfie = document.getElementById('inv-require-selfie');
+  if(reqSelfie) reqSelfie.checked = true;
   // Refresh conditional label
   onInvTypeChange();
   // Reset modal state
@@ -1272,6 +1300,7 @@ function _buildInvitationPayload(){
   const prefillCo   = document.getElementById('inv-prefill-company').value.trim();
   const prefillBy   = document.getElementById('inv-prefill-introduced').value.trim();
   const language    = document.querySelector('input[name="inv-language"]:checked')?.value || 'en';
+  const requireSelfie = !!document.getElementById('inv-require-selfie')?.checked;
 
   if(!name || !email) return { error: 'Client name and email are required' };
 
@@ -1288,6 +1317,7 @@ function _buildInvitationPayload(){
       pre_filled_company_name:  prefillCo || null,
       pre_filled_introduced_by: prefillBy || null,
       language:                 language,
+      require_selfie:           requireSelfie,
     }
   };
 }
@@ -1434,6 +1464,9 @@ async function editInvitation(invitationId){
   // Language
   const lang = inv.language || 'en';
   document.querySelectorAll('input[name="inv-language"]').forEach(r => r.checked = (r.value === lang));
+  // Require selfie toggle — default true for legacy rows where the column doesn't exist yet
+  const reqSelfie = document.getElementById('inv-require-selfie');
+  if(reqSelfie) reqSelfie.checked = (inv.require_selfie !== false);
   // Validity: compute days remaining (rounded), pick closest of 14/21
   // (If we round-trip a 21-day invitation we want the radio to reflect what was originally chosen.)
   const daysOriginal = Math.round((new Date(inv.expires_at) - new Date(inv.created_at)) / (1000 * 60 * 60 * 24));
