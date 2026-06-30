@@ -518,6 +518,17 @@ const SUPABASE_URL = 'https://dnvmprywxeuzhjumtnpm.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRudm1wcnl3eGV1emhqdW10bnBtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgzNDY5MjMsImV4cCI6MjA5MzkyMjkyM30.hAHkY1se2EZ834TIEEpger-cNG3EQIhWYs31CPzXH7w';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+// ── XSS DEFENCE ──
+// Every user-controlled value rendered into innerHTML must go through this helper.
+// Applicants control most fields on submissions and invitations (name, email, company name,
+// addresses, free-text fields, file names) so without escaping, a hostile applicant could
+// inject <script> or onerror handlers that execute in the AMLCO's authenticated session.
+// Also use it for audit-log JSON snippets and any document file_name we render.
+const escapeHtml = v => String(v ?? '')
+  .replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;')
+  .replaceAll('"','&quot;').replaceAll("'",'&#39;');
+const _h = escapeHtml; // short alias for readability inside template literals
+
 const KYC_FORM_URL = 'https://kyc.predeevo.com';
 
 // State
@@ -791,12 +802,12 @@ function renderOverview(){
     <thead><tr><th>Reference</th><th>Applicant</th><th>Company</th><th>Submitted</th><th>Status</th><th></th></tr></thead>
     <tbody>${recent.map(s => `
       <tr>
-        <td style="font-family:monospace;font-weight:600">${s.reference || '—'}</td>
-        <td>${s.first_name||''} ${s.surname||''}</td>
-        <td>${s.company_name || s.entity_name || '—'}</td>
+        <td style="font-family:monospace;font-weight:600">${_h(s.reference || '—')}</td>
+        <td>${_h(s.first_name||'')} ${_h(s.surname||'')}</td>
+        <td>${_h(s.company_name || s.entity_name || '—')}</td>
         <td>${s.submitted_at ? new Date(s.submitted_at).toLocaleDateString('en-GB') : '—'}</td>
-        <td><span class="badge badge-${s.status}">${(s.status||'').replace('_',' ')}</span></td>
-        <td><button class="btn btn-outline btn-sm" onclick="viewSubmission('${s.id}')">View</button></td>
+        <td><span class="badge badge-${_h(s.status)}">${_h((s.status||'').replace('_',' '))}</span></td>
+        <td><button class="btn btn-outline btn-sm" onclick="viewSubmission('${_h(s.id)}')">View</button></td>
       </tr>`).join('')}
     </tbody>
   </table>`;
@@ -832,14 +843,14 @@ function renderSubmissions(){
     <thead><tr><th>Reference</th><th>Applicant</th><th>Company</th><th>Email</th><th>Services</th><th>Submitted</th><th>Status</th><th></th></tr></thead>
     <tbody>${filtered.map(s => `
       <tr>
-        <td style="font-family:monospace;font-weight:600">${s.reference || '—'}</td>
-        <td>${s.first_name||''} ${s.surname||''}</td>
-        <td>${s.company_name || s.entity_name || '—'}</td>
-        <td>${s.email || '—'}</td>
-        <td style="font-size:11px;color:var(--muted)">${(s.services || []).slice(0,2).join(', ')}${(s.services||[]).length > 2 ? '…' : ''}</td>
+        <td style="font-family:monospace;font-weight:600">${_h(s.reference || '—')}</td>
+        <td>${_h(s.first_name||'')} ${_h(s.surname||'')}</td>
+        <td>${_h(s.company_name || s.entity_name || '—')}</td>
+        <td>${_h(s.email || '—')}</td>
+        <td style="font-size:11px;color:var(--muted)">${_h((s.services || []).slice(0,2).join(', '))}${(s.services||[]).length > 2 ? '…' : ''}</td>
         <td>${s.submitted_at ? new Date(s.submitted_at).toLocaleDateString('en-GB') : '—'}</td>
-        <td><span class="badge badge-${s.status}">${(s.status||'').replace('_',' ')}</span></td>
-        <td><button class="btn btn-outline btn-sm" onclick="viewSubmission('${s.id}')">View</button></td>
+        <td><span class="badge badge-${_h(s.status)}">${_h((s.status||'').replace('_',' '))}</span></td>
+        <td><button class="btn btn-outline btn-sm" onclick="viewSubmission('${_h(s.id)}')">View</button></td>
       </tr>`).join('')}
     </tbody>
   </table>`;
@@ -877,20 +888,23 @@ async function viewSubmission(id){
     other:      'Other'
   };
 
-  // Helpers
-  const fmt    = v => v ?? '—';
+  // Helpers — fmt now HTML-escapes any user-controlled value before returning so the
+  // dozens of `${fmt(sub.something)}` interpolations in this function are XSS-safe.
+  // fmtEur, fmtDate, fmtBool produce strings under our control (digits, dates, fixed glyphs)
+  // so they don't need escaping.
+  const fmt    = v => (v == null || v === '') ? '—' : _h(v);
   const fmtEur = v => (v != null && v !== '') ? '€' + Number(v).toLocaleString('en-GB') : '—';
   const fmtDate= v => v ? new Date(v).toLocaleDateString('en-GB') : '—';
   const fmtBool= v => v === true ? '✓' : (v === false ? '✗' : '—');
 
   let html = `
-    <div class="alert alert-info"><i class="ti ti-info-circle"></i>Submitted ${sub.submitted_at ? new Date(sub.submitted_at).toLocaleString('en-GB',{timeZone:'Europe/Nicosia'}) : '—'} · Status: <strong style="margin-left:4px">${(sub.status||'').replace('_',' ')}</strong></div>
+    <div class="alert alert-info"><i class="ti ti-info-circle"></i>Submitted ${sub.submitted_at ? new Date(sub.submitted_at).toLocaleString('en-GB',{timeZone:'Europe/Nicosia'}) : '—'} · Status: <strong style="margin-left:4px">${_h((sub.status||'').replace('_',' '))}</strong></div>
 
     <h3 style="font-size:13px;font-weight:700;margin:16px 0 8px">Applicant identity</h3>
     <div class="detail-grid">
-      <div class="detail-label">Full name</div><div class="detail-value">${fmt(applicant?.full_name) || (sub.first_name||'') + ' ' + (sub.surname||'')}</div>
+      <div class="detail-label">Full name</div><div class="detail-value">${applicant?.full_name ? _h(applicant.full_name) : (_h(sub.first_name||'') + ' ' + _h(sub.surname||''))}</div>
       <div class="detail-label">Email</div><div class="detail-value">${fmt(applicant?.email || sub.email)}</div>
-      <div class="detail-label">Mobile</div><div class="detail-value">${(applicant?.mobile_country_code || '') + ' ' + fmt(applicant?.mobile || sub.mobile)}</div>
+      <div class="detail-label">Mobile</div><div class="detail-value">${_h(applicant?.mobile_country_code || '')} ${fmt(applicant?.mobile || sub.mobile)}</div>
       <div class="detail-label">Date of birth</div><div class="detail-value">${fmtDate(applicant?.dob || sub.dob)}</div>
       <div class="detail-label">Place of birth</div><div class="detail-value">${fmt(applicant?.place_of_birth || sub.place_of_birth)}</div>
       <div class="detail-label">Nationality</div><div class="detail-value">${fmt(applicant?.nationality || sub.nationality)}</div>
@@ -910,7 +924,7 @@ async function viewSubmission(id){
 
     <h3 style="font-size:13px;font-weight:700;margin:18px 0 8px">Engagement details</h3>
     <div class="detail-grid">
-      <div class="detail-label">Services requested</div><div class="detail-value">${(sub.services||[]).join(', ') || '—'}</div>
+      <div class="detail-label">Services requested</div><div class="detail-value">${_h((sub.services||[]).join(', ')) || '—'}</div>
       <div class="detail-label">Other services</div><div class="detail-value">${fmt(sub.other_services_description)}</div>
       <div class="detail-label">Introduced by</div><div class="detail-value">${fmt(sub.introduced_by)}</div>
       <div class="detail-label">Proposed company name</div><div class="detail-value">${fmt(sub.company_name)}</div>
@@ -946,7 +960,7 @@ async function viewSubmission(id){
         <td>${s.pep_status === 'yes' ? '<span style="color:var(--amber);font-weight:700">⚠</span>' : (s.pep_status === 'no' ? '✗' : '—')}</td>
         <td>${fmtBool(s.is_ubo)}</td>
         <td>${fmtBool(s.is_applicant)}</td>
-        <td style="font-size:10px;color:var(--muted)">${s.kyc_status || '—'}</td>
+        <td style="font-size:10px;color:var(--muted)">${_h(s.kyc_status || '—')}</td>
       </tr>`).join('')}</tbody></table>
     ` : ''}
 
@@ -961,7 +975,7 @@ async function viewSubmission(id){
     ${sowSources ? `
     <h3 style="font-size:13px;font-weight:700;margin:18px 0 8px">Source of wealth <span style="font-size:10px;color:var(--amber);background:var(--amber-light);padding:2px 8px;border-radius:10px;margin-left:6px">PEP / EDD</span></h3>
     <table class="tbl" style="font-size:11.5px"><thead><tr><th>Category</th><th>Declared value</th></tr></thead>
-    <tbody>${Object.entries(sowSources).map(([k,v]) => `<tr><td>${sowKeyLabels[k] || k}${k === 'other' && sub.sow_other_description ? `<div style="font-size:10px;color:var(--muted);margin-top:2px">${sub.sow_other_description}</div>` : ''}</td><td>${fmtEur(v)}</td></tr>`).join('')}
+    <tbody>${Object.entries(sowSources).map(([k,v]) => `<tr><td>${_h(sowKeyLabels[k] || k)}${k === 'other' && sub.sow_other_description ? `<div style="font-size:10px;color:var(--muted);margin-top:2px">${_h(sub.sow_other_description)}</div>` : ''}</td><td>${fmtEur(v)}</td></tr>`).join('')}
     <tr style="font-weight:700;background:var(--bg)"><td>Total declared wealth</td><td>${fmtEur(sub.sow_total_declared)}</td></tr>
     </tbody></table>
     ` : ''}
@@ -1000,7 +1014,7 @@ async function viewSubmission(id){
             <div id="iv-id-slot" data-doc-id="${idDoc ? idDoc.id : ''}" style="height:240px;background:#f3f4f6;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--muted);overflow:hidden;${idDoc ? 'cursor:pointer' : ''}" ${idDoc ? `onclick="viewDocument('${idDoc.id}')"` : ''}>
               ${idDoc ? 'Loading preview…' : '<span><i class="ti ti-file-off" style="font-size:18px;display:block;margin-bottom:4px"></i>No ID document uploaded</span>'}
             </div>
-            ${idDoc ? `<div style="font-size:10px;color:var(--muted);margin-top:5px;word-break:break-all">${fmt(idDoc.file_name)} · ${(idDoc.doc_type||'').replace(/_/g,' ')}</div>` : ''}
+            ${idDoc ? `<div style="font-size:10px;color:var(--muted);margin-top:5px;word-break:break-all">${fmt(idDoc.file_name)} · ${_h((idDoc.doc_type||'').replace(/_/g,' '))}</div>` : ''}
           </div>
           <div>
             <div style="font-size:11px;font-weight:600;color:var(--text);margin-bottom:6px;display:flex;align-items:center;gap:5px"><i class="ti ti-camera-selfie" style="font-size:13px;color:var(--blue)"></i>Applicant selfie</div>
@@ -1023,13 +1037,13 @@ async function viewSubmission(id){
       <table class="tbl" style="font-size:11.5px"><thead><tr><th>Type</th><th>File</th><th>Size</th><th>Uploaded</th><th style="width:160px;text-align:right">Actions</th></tr></thead>
       <tbody>${tableDocs.map(d => `
         <tr>
-          <td>${(d.doc_type || '').replace(/_/g, ' ')}</td>
+          <td>${_h((d.doc_type || '').replace(/_/g, ' '))}</td>
           <td style="word-break:break-all">${fmt(d.file_name)}</td>
           <td>${d.file_size ? (d.file_size / 1024 / 1024 < 1 ? Math.round(d.file_size/1024) + ' KB' : (d.file_size/1024/1024).toFixed(2) + ' MB') : '—'}</td>
           <td>${fmtDate(d.uploaded_at)}</td>
           <td style="text-align:right;white-space:nowrap">
-            <button class="btn btn-outline btn-sm" onclick="viewDocument('${d.id}','${(d.file_name||'').replace(/'/g, '&#39;')}')" title="View document"><i class="ti ti-eye"></i></button>
-            <button class="btn btn-outline btn-sm" onclick="downloadDocument('${d.id}','${(d.file_name||'').replace(/'/g, '&#39;')}')" title="Download document" style="margin-left:4px"><i class="ti ti-download"></i></button>
+            <button class="btn btn-outline btn-sm" onclick="viewDocument('${_h(d.id)}','${_h(d.file_name||'')}')" title="View document"><i class="ti ti-eye"></i></button>
+            <button class="btn btn-outline btn-sm" onclick="downloadDocument('${_h(d.id)}','${_h(d.file_name||'')}')" title="Download document" style="margin-left:4px"><i class="ti ti-download"></i></button>
           </td>
         </tr>`).join('')}</tbody></table>
       ` : '<div class="tbl-empty"><i class="ti ti-file-off"></i>No documents uploaded</div>';
@@ -1055,9 +1069,9 @@ async function viewSubmission(id){
   document.getElementById('detail-body').innerHTML = html;
   document.getElementById('detail-actions').innerHTML = `
     <button class="btn btn-outline" onclick="closeModal('modal-detail')">Close</button>
-    <button class="btn btn-red" onclick="updateSubmissionStatus('${id}','rejected')">Reject</button>
-    <button class="btn btn-amber" onclick="updateSubmissionStatus('${id}','edd_required')">Request EDD</button>
-    <button class="btn btn-teal" onclick="updateSubmissionStatus('${id}','approved')">Approve</button>
+    <button class="btn btn-red" onclick="updateSubmissionStatus('${_h(id)}','rejected')">Reject</button>
+    <button class="btn btn-amber" onclick="updateSubmissionStatus('${_h(id)}','edd_required')">Request EDD</button>
+    <button class="btn btn-teal" onclick="updateSubmissionStatus('${_h(id)}','approved')">Approve</button>
   `;
   document.getElementById('modal-detail').classList.add('open');
 
@@ -1219,19 +1233,19 @@ function renderInvitations(){
     <thead><tr><th>Client</th><th>Email</th><th>Company</th><th>Created</th><th>Expires</th><th>Status</th><th></th></tr></thead>
     <tbody>${filtered.map(i => `
       <tr>
-        <td><strong>${i.client_name || '—'}</strong>${i.require_selfie === false ? ' <span title="Selfie not required — client met in person" style="font-size:9.5px;font-weight:600;padding:1px 6px;border-radius:9px;background:var(--blue-pale);color:var(--blue);margin-left:4px;vertical-align:middle">in-person</span>' : ''}</td>
-        <td>${i.client_email || '—'}</td>
-        <td>${i.client_company || '—'}</td>
+        <td><strong>${_h(i.client_name || '—')}</strong>${i.require_selfie === false ? ' <span title="Selfie not required — client met in person" style="font-size:9.5px;font-weight:600;padding:1px 6px;border-radius:9px;background:var(--blue-pale);color:var(--blue);margin-left:4px;vertical-align:middle">in-person</span>' : ''}</td>
+        <td>${_h(i.client_email || '—')}</td>
+        <td>${_h(i.client_company || '—')}</td>
         <td>${new Date(i.created_at).toLocaleDateString('en-GB')}</td>
         <td>${new Date(i.expires_at).toLocaleDateString('en-GB')}</td>
-        <td><span class="badge badge-${i.status}">${i.status}</span></td>
+        <td><span class="badge badge-${_h(i.status)}">${_h(i.status)}</span></td>
         <td style="white-space:nowrap">
           ${i.status === 'pending' ? `
-            <button class="btn btn-outline btn-sm" onclick="copyInviteLink('${i.token}', this)" title="Copy link"><i class="ti ti-copy"></i></button>
-            ${!i.sent_at ? `<button class="btn btn-outline btn-sm" onclick="editInvitation('${i.id}')" title="Edit invitation" style="margin-left:4px"><i class="ti ti-edit"></i></button>` : ''}
-            <button class="btn btn-outline btn-sm" onclick="revokeInvitation('${i.id}')" title="Revoke" style="color:var(--red);margin-left:4px"><i class="ti ti-x"></i></button>
+            <button class="btn btn-outline btn-sm" onclick="copyInviteLink('${_h(i.token)}', this)" title="Copy link"><i class="ti ti-copy"></i></button>
+            ${!i.sent_at ? `<button class="btn btn-outline btn-sm" onclick="editInvitation('${_h(i.id)}')" title="Edit invitation" style="margin-left:4px"><i class="ti ti-edit"></i></button>` : ''}
+            <button class="btn btn-outline btn-sm" onclick="revokeInvitation('${_h(i.id)}')" title="Revoke" style="color:var(--red);margin-left:4px"><i class="ti ti-x"></i></button>
           ` : `
-            <button class="btn btn-outline btn-sm" onclick="copyInviteLink('${i.token}', this)" title="Copy link"><i class="ti ti-copy"></i></button>
+            <button class="btn btn-outline btn-sm" onclick="copyInviteLink('${_h(i.token)}', this)" title="Copy link"><i class="ti ti-copy"></i></button>
           `}
         </td>
       </tr>`).join('')}
@@ -1592,8 +1606,8 @@ function renderAudit(){
     <tbody>${allAudit.map(a => `
       <tr>
         <td style="white-space:nowrap;font-size:11px;color:var(--muted)">${new Date(a.created_at).toLocaleString('en-GB',{timeZone:'Europe/Nicosia'})}</td>
-        <td><strong>${a.event}</strong></td>
-        <td style="font-size:11px;color:var(--muted)">${a.details ? JSON.stringify(a.details).substring(0,80) : '—'}</td>
+        <td><strong>${_h(a.event)}</strong></td>
+        <td style="font-size:11px;color:var(--muted)">${a.details ? _h(JSON.stringify(a.details).substring(0,80)) : '—'}</td>
       </tr>`).join('')}
     </tbody>
   </table>`;
