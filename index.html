@@ -960,7 +960,7 @@ async function viewSubmission(id){
         <td>${s.pep_status === 'yes' ? '<span style="color:var(--amber);font-weight:700">⚠</span>' : (s.pep_status === 'no' ? '✗' : '—')}</td>
         <td>${fmtBool(s.is_ubo)}</td>
         <td>${fmtBool(s.is_applicant)}</td>
-        <td style="font-size:10px;color:var(--muted)">${_h(s.kyc_status || '—')}</td>
+        <td style="font-size:10px;color:var(--muted)">${s.kyc_status === 'self_completed' ? '<span style="background:#E1F5EE;color:#1D9E75;font-weight:700;padding:1px 7px;border-radius:8px;font-size:9.5px;white-space:nowrap">own link ✓</span>' : _h(s.kyc_status || '—')}</td>
       </tr>`).join('')}</tbody></table>
     ` : ''}
 
@@ -981,63 +981,75 @@ async function viewSubmission(id){
     ` : ''}
 
     ${(() => {
-      // ── Identity verification: manual face match panel ──
-      // The applicant uploads a selfie in Step 4 of the KYC form. There's no third-party
-      // biometric API — the compliance officer compares this selfie to the ID document
-      // photo here. Both images are previewed inline via short-lived signed URLs (5 min TTL).
-      // When the AMLCO set require_selfie=false on the invitation (client met in person),
-      // we render an "in-person verification" notice instead of the dual-image comparison.
-      const selfieDoc = docs.find(d => d.doc_type === 'identity_selfie');
-      const idDoc     = docs.find(d => d.doc_type === 'passport') ||
-                        docs.find(d => d.doc_type === 'id_card');
+      // ── Identity verification: manual face match panel(s) ──
+      // One comparison card per person: the applicant (docs with person_label NULL)
+      // plus each UBO who completed their own secure link (ubo.html tags their
+      // uploads with person_label). No third-party biometric API — the compliance
+      // officer compares each selfie to the matching ID document photo. Previews
+      // load via short-lived signed URLs (5 min TTL).
       const linkedInv = (sub.current_invitation_id && Array.isArray(allInvitations))
         ? allInvitations.find(i => i.id === sub.current_invitation_id) : null;
       const selfieWasRequired = !linkedInv || linkedInv.require_selfie !== false;
-      if(!selfieWasRequired){
+      const uboLabels = [...new Set(docs.filter(d => d.person_label).map(d => d.person_label))];
+      const docsFor = label => docs.filter(d => (d.person_label || null) === label);
+      let _ivSlotN = 0;
+      const pairCard = (personTitle, pdocs) => {
+        const selfieDoc = pdocs.find(d => d.doc_type === 'identity_selfie');
+        const idDoc     = pdocs.find(d => d.doc_type === 'passport') || pdocs.find(d => d.doc_type === 'id_card');
+        const n = _ivSlotN++;
         return `
-      <h3 style="font-size:13px;font-weight:700;margin:18px 0 8px">Identity verification — applicant verified in person</h3>
-      <div style="border:0.5px solid var(--blue-border);background:var(--blue-pale);border-radius:10px;padding:14px;margin-bottom:14px;display:flex;align-items:flex-start;gap:10px">
-        <i class="ti ti-user-check" style="font-size:20px;color:var(--blue);flex-shrink:0;margin-top:1px"></i>
-        <div style="font-size:11.5px;line-height:1.55;color:var(--text)"><strong>No identity selfie was requested for this invitation.</strong><br><span style="color:var(--muted)">The AMLCO opted to verify this client's identity face-to-face. Identity confirmation is documented offline. The ID document(s) uploaded in Step 3 remain available below for the file record.</span></div>
-      </div>`;
-      }
-      return `
-      <h3 style="font-size:13px;font-weight:700;margin:18px 0 8px">Identity verification — manual face match required</h3>
       <div style="border:0.5px solid var(--blue-border);background:var(--blue-pale);border-radius:10px;padding:14px;margin-bottom:14px">
-        <div style="font-size:11.5px;color:var(--muted);margin-bottom:12px;line-height:1.5;display:flex;align-items:flex-start;gap:6px">
-          <i class="ti ti-eye-search" style="font-size:14px;color:var(--blue);flex-shrink:0;margin-top:1px"></i>
-          <span>Compare the applicant's selfie to the photo on their ID document below. If the faces don't match, reject the submission or request enhanced due diligence. Click either image to open the full-size original in a new tab (audit-logged).</span>
-        </div>
+        <div style="font-size:11.5px;font-weight:700;margin-bottom:10px;display:flex;align-items:center;gap:6px"><i class="ti ti-user-scan" style="font-size:14px;color:var(--blue)"></i>${_h(personTitle)}</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
           <div>
             <div style="font-size:11px;font-weight:600;color:var(--text);margin-bottom:6px;display:flex;align-items:center;gap:5px"><i class="ti ti-id" style="font-size:13px;color:var(--blue)"></i>ID document photo</div>
-            <div id="iv-id-slot" data-doc-id="${idDoc ? idDoc.id : ''}" style="height:240px;background:#f3f4f6;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--muted);overflow:hidden;${idDoc ? 'cursor:pointer' : ''}" ${idDoc ? `onclick="viewDocument('${idDoc.id}')"` : ''}>
+            <div id="iv-id-slot-${n}" class="iv-slot" data-doc-id="${idDoc ? _h(idDoc.id) : ''}" style="height:240px;background:#f3f4f6;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--muted);overflow:hidden;${idDoc ? 'cursor:pointer' : ''}" ${idDoc ? `onclick="viewDocument('${_h(idDoc.id)}')"` : ''}>
               ${idDoc ? 'Loading preview…' : '<span><i class="ti ti-file-off" style="font-size:18px;display:block;margin-bottom:4px"></i>No ID document uploaded</span>'}
             </div>
             ${idDoc ? `<div style="font-size:10px;color:var(--muted);margin-top:5px;word-break:break-all">${fmt(idDoc.file_name)} · ${_h((idDoc.doc_type||'').replace(/_/g,' '))}</div>` : ''}
           </div>
           <div>
-            <div style="font-size:11px;font-weight:600;color:var(--text);margin-bottom:6px;display:flex;align-items:center;gap:5px"><i class="ti ti-camera-selfie" style="font-size:13px;color:var(--blue)"></i>Applicant selfie</div>
-            <div id="iv-selfie-slot" data-doc-id="${selfieDoc ? selfieDoc.id : ''}" style="height:240px;background:#f3f4f6;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--muted);overflow:hidden;${selfieDoc ? 'cursor:pointer' : ''}" ${selfieDoc ? `onclick="viewDocument('${selfieDoc.id}')"` : ''}>
+            <div style="font-size:11px;font-weight:600;color:var(--text);margin-bottom:6px;display:flex;align-items:center;gap:5px"><i class="ti ti-camera-selfie" style="font-size:13px;color:var(--blue)"></i>Selfie</div>
+            <div id="iv-selfie-slot-${n}" class="iv-slot" data-doc-id="${selfieDoc ? _h(selfieDoc.id) : ''}" style="height:240px;background:#f3f4f6;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--muted);overflow:hidden;${selfieDoc ? 'cursor:pointer' : ''}" ${selfieDoc ? `onclick="viewDocument('${_h(selfieDoc.id)}')"` : ''}>
               ${selfieDoc ? 'Loading preview…' : '<span><i class="ti ti-camera-off" style="font-size:18px;display:block;margin-bottom:4px"></i>No selfie uploaded</span>'}
             </div>
             ${selfieDoc ? `<div style="font-size:10px;color:var(--muted);margin-top:5px;word-break:break-all">${fmt(selfieDoc.file_name)} · uploaded ${fmtDate(selfieDoc.uploaded_at)}</div>` : ''}
           </div>
         </div>
       </div>`;
+      };
+      let ivHtml = `
+      <h3 style="font-size:13px;font-weight:700;margin:18px 0 8px">Identity verification — manual face match</h3>`;
+      if(!selfieWasRequired){
+        ivHtml += `
+      <div style="border:0.5px solid var(--blue-border);background:var(--blue-pale);border-radius:10px;padding:14px;margin-bottom:14px;display:flex;align-items:flex-start;gap:10px">
+        <i class="ti ti-user-check" style="font-size:20px;color:var(--blue);flex-shrink:0;margin-top:1px"></i>
+        <div style="font-size:11.5px;line-height:1.55;color:var(--text)"><strong>No identity selfie was requested for the applicant.</strong><br><span style="color:var(--muted)">The AMLCO opted to verify this client's identity face-to-face. Identity confirmation is documented offline. The ID document(s) uploaded in Step 3 remain available below for the file record.</span></div>
+      </div>`;
+      } else {
+        ivHtml += `
+      <div style="font-size:11.5px;color:var(--muted);margin-bottom:12px;line-height:1.5;display:flex;align-items:flex-start;gap:6px">
+        <i class="ti ti-eye-search" style="font-size:14px;color:var(--blue);flex-shrink:0;margin-top:1px"></i>
+        <span>Compare each person's selfie to the photo on their ID document. If the faces don't match, reject the submission or request enhanced due diligence. Click any image to open the full-size original in a new tab (audit-logged).</span>
+      </div>`;
+        ivHtml += pairCard('Applicant' + (applicant && applicant.full_name ? ' — ' + applicant.full_name : ''), docsFor(null));
+      }
+      uboLabels.forEach(label => { ivHtml += pairCard(label + ' — completed via own secure link', docsFor(label)); });
+      return ivHtml;
     })()}
-
     <h3 style="font-size:13px;font-weight:700;margin:18px 0 8px">Documents (${docs.filter(d => d.doc_type !== 'identity_selfie').length})</h3>
     ${(() => {
       // Hide the selfie from the regular Documents listing — it's already represented in the
       // Identity verification card above. ID docs remain in both places (useful in the table
       // for file-management purposes).
-      const tableDocs = docs.filter(d => d.doc_type !== 'identity_selfie');
+      const tableDocs = docs.filter(d => d.doc_type !== 'identity_selfie')
+        .slice().sort((a, b) => String(a.person_label || '').localeCompare(String(b.person_label || '')));
       return tableDocs.length ? `
-      <table class="tbl" style="font-size:11.5px"><thead><tr><th>Type</th><th>File</th><th>Size</th><th>Uploaded</th><th style="width:160px;text-align:right">Actions</th></tr></thead>
+      <table class="tbl" style="font-size:11.5px"><thead><tr><th>Type</th><th>Person</th><th>File</th><th>Size</th><th>Uploaded</th><th style="width:160px;text-align:right">Actions</th></tr></thead>
       <tbody>${tableDocs.map(d => `
         <tr>
           <td>${_h((d.doc_type || '').replace(/_/g, ' '))}</td>
+          <td style="font-size:10.5px">${d.person_label ? _h(d.person_label) : '<span style="color:var(--muted)">Applicant</span>'}</td>
           <td style="word-break:break-all">${fmt(d.file_name)}</td>
           <td>${d.file_size ? (d.file_size / 1024 / 1024 < 1 ? Math.round(d.file_size/1024) + ' KB' : (d.file_size/1024/1024).toFixed(2) + ' MB') : '—'}</td>
           <td>${fmtDate(d.uploaded_at)}</td>
@@ -1083,8 +1095,7 @@ async function viewSubmission(id){
   // We can't embed images via createSignedUrl synchronously inside the HTML template
   // string above (Supabase calls are async). So we render placeholder slots first and
   // then populate them here, after the modal is in the DOM.
-  _populateFaceMatchSlot('iv-id-slot');
-  _populateFaceMatchSlot('iv-selfie-slot');
+  document.querySelectorAll('#detail-body .iv-slot').forEach(el => _populateFaceMatchSlot(el.id));
 }
 
 // Helper for the manual face-match panel — generates a 5-minute signed URL for the doc
@@ -1146,7 +1157,7 @@ async function _generateSignedDocUrl(docId, opts = {}){
 
 async function _logDocAccess(doc, action){
   try {
-    await sb.from('kyc_audit_log').insert({
+    const { error } = await sb.from('kyc_audit_log').insert({
       application_id: doc.application_id,
       event: action,                  // 'document_viewed' or 'document_downloaded'
       details: {
@@ -1157,6 +1168,7 @@ async function _logDocAccess(doc, action){
         at: new Date().toISOString()
       }
     });
+    if(error) console.warn('Could not write audit log entry (access still allowed):', error.message);
   } catch(e){
     console.warn('Could not write audit log entry (access still allowed):', e);
   }
@@ -1186,11 +1198,12 @@ async function updateSubmissionStatus(id, newStatus){
     .eq('id', id);
   if(error){ alert('Update failed: ' + error.message); return; }
   // Audit
-  await sb.from('kyc_audit_log').insert({
+  const { error: _auditErr } = await sb.from('kyc_audit_log').insert({
     application_id: id,
     event: 'status_changed',
     details: { new_status: newStatus, by: userLabel }
   });
+  if(_auditErr) console.warn('Audit log write failed (status change still saved):', _auditErr.message);
   closeModal('modal-detail');
   await loadAll();
   showView('submissions');
@@ -1525,11 +1538,12 @@ async function saveInvitationEdit(invitationId){
     if(error) throw error;
 
     // Audit
-    await sb.from('kyc_audit_log').insert({
+    const { error: _auditErr } = await sb.from('kyc_audit_log').insert({
       application_id: null,
       event: 'invitation_edited',
       details: { invitation_id: invitationId, by: currentUser?.email || 'unknown' }
     });
+    if(_auditErr) console.warn('Audit log write failed (invitation edit still saved):', _auditErr.message);
 
     closeModal('modal-invite');
     if(saveBtn){ saveBtn.style.display = 'none'; }
