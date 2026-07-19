@@ -861,16 +861,18 @@ async function viewSubmission(id){
   if(!sub) return;
 
   // Load all related data in parallel
-  const [shRes, sofRes, qRes, docRes] = await Promise.all([
+  const [shRes, sofRes, qRes, docRes, uboRes] = await Promise.all([
     sb.from('kyc_shareholders').select('*').eq('application_id', id),
     sb.from('kyc_source_of_funds').select('*').eq('application_id', id),
     sb.from('kyc_questionnaire').select('*').eq('application_id', id),
     sb.from('kyc_documents').select('*').eq('application_id', id).order('uploaded_at', {ascending: true}),
+    sb.from('kyc_ubo_sessions').select('person_name,status,fields,completed_at').eq('application_id', id),
   ]);
   const shareholders = shRes.data || [];
   const sof = sofRes.data || [];
   const questions = qRes.data || [];
   const docs = docRes.data || [];
+  const uboSessions = uboRes.data || [];
 
   document.getElementById('detail-ref').textContent = sub.reference;
 
@@ -979,6 +981,23 @@ async function viewSubmission(id){
     <tr style="font-weight:700;background:var(--bg)"><td>Total declared wealth</td><td>${fmtEur(sub.sow_total_declared)}</td></tr>
     </tbody></table>
     ` : ''}
+
+    ${(() => {
+      // ── Per-UBO background questionnaires (answered on their own link; stored
+      //    in kyc_ubo_sessions.fields.questionnaire — per-person, unlike the
+      //    application-level kyc_questionnaire the applicant answers) ──
+      const Q_TITLES = { other_names:'Other names', ownership:'Ownership (acting for self)', entry:'Entry refusal', ml:'AML awareness', prohibited:'Prohibited activities', investigations:'Investigations', convictions:'Convictions', bankruptcy:'Bankruptcy / insolvency', tax_audit:'Tax audit', insurance:'Insurance refusal', litigation:'Litigation' };
+      const Q_INV = { ownership:true, ml:true };  // adverse answer is NO for these
+      const withQ = (uboSessions || []).filter(s => s.status === 'completed' && s.fields && Array.isArray(s.fields.questionnaire) && s.fields.questionnaire.length);
+      if(!withQ.length) return '';
+      return withQ.map(s => `
+      <h3 style="font-size:13px;font-weight:700;margin:18px 0 8px">Background questionnaire — ${_h(s.person_name)} <span style="font-size:9.5px;background:#E1F5EE;color:#1D9E75;font-weight:700;padding:1px 7px;border-radius:8px;margin-left:6px">own link</span></h3>
+      <table class="tbl" style="font-size:11.5px"><thead><tr><th style="width:28px">#</th><th>Topic</th><th style="width:70px">Answer</th><th>Details</th></tr></thead>
+      <tbody>${s.fields.questionnaire.map((r, i) => {
+        const adverse = Q_INV[r.question_id] ? r.answer === false : r.answer === true;
+        return `<tr><td>${i + 1}</td><td>${_h(Q_TITLES[r.question_id] || r.question_id)}</td><td style="font-weight:700;color:${adverse ? 'var(--red)' : 'var(--teal)'}">${r.answer ? 'YES' : 'NO'}${adverse ? ' ⚠' : ''}</td><td>${_h(r.details || '—')}</td></tr>`;
+      }).join('')}</tbody></table>`).join('');
+    })()}
 
     ${(() => {
       // ── Identity verification: manual face match panel(s) ──
