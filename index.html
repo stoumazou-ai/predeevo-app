@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Predeevo App</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css" rel="stylesheet">
@@ -434,13 +436,11 @@ input:focus,textarea:focus,select:focus{border-color:var(--blue)}
           <label class="lbl">Services to be engaged</label>
           <div id="inv-services" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:4px">
             <label class="svc-chk"><input type="checkbox" value="incorp">Company incorporation</label>
+            <label class="svc-chk"><input type="checkbox" value="audit">Audit &amp; assurance</label>
             <label class="svc-chk"><input type="checkbox" value="accounting">Accounting &amp; bookkeeping</label>
             <label class="svc-chk"><input type="checkbox" value="tax">Tax advisory &amp; compliance</label>
             <label class="svc-chk"><input type="checkbox" value="payroll">Payroll services</label>
-            <label class="svc-chk"><input type="checkbox" value="audit">Audit &amp; assurance</label>
-            <label class="svc-chk"><input type="checkbox" value="admin">Company administration</label>
-            <label class="svc-chk"><input type="checkbox" value="director">Director / nominee</label>
-            <label class="svc-chk"><input type="checkbox" value="trust">Trust &amp; foundation</label>
+            <label class="svc-chk"><input type="checkbox" value="director">Nominee services</label>
             <label class="svc-chk"><input type="checkbox" value="regoffice">Registered office</label>
             <label class="svc-chk"><input type="checkbox" value="other">Other</label>
           </div>
@@ -941,6 +941,9 @@ async function viewSubmission(id){
       <div class="detail-label">Economic rationale</div><div class="detail-value">${fmt(sub.economic_rationale || sub.entity_rationale)}</div>
       <div class="detail-label">Operating funds source</div><div class="detail-value">${fmt(sub.operating_funds_source)}</div>
       <div class="detail-label">Countries of operation</div><div class="detail-value">${fmt(sub.countries_operation)}</div>
+      <div class="detail-label">Directors</div><div class="detail-value">${Array.isArray(sub.directors) && sub.directors.length ? _h(sub.directors.join(', ')) : '—'}</div>
+      <div class="detail-label">Company secretary</div><div class="detail-value">${fmt(sub.company_secretary)}</div>
+      <div class="detail-label">Registered office</div><div class="detail-value">${fmt(sub.registered_office)}</div>
       <div class="detail-label">Expected employees</div><div class="detail-value">${fmt(sub.expected_employees)}</div>
       <div class="detail-label">Share capital</div><div class="detail-value">${fmtEur(sub.share_capital)}</div>
       <div class="detail-label">Turnover Y1</div><div class="detail-value">${fmtEur(sub.turnover_y1 || sub.entity_turnover_y1)}</div>
@@ -956,7 +959,7 @@ async function viewSubmission(id){
         <td>${fmt(s.full_name)}</td>
         <td>${s.shareholding_pct != null ? s.shareholding_pct + '%' : '—'}</td>
         <td>${fmt(s.ownership_type)}</td>
-        <td>${fmt(s.nationality)}</td>
+        <td>${_h([s.nationality, s.second_nationality].filter(Boolean).join(' / ') || '—')}</td>
         <td>${fmtDate(s.dob)}</td>
         <td>${fmt(s.passport_number)}</td>
         <td>${s.pep_status === 'yes' ? '<span style="color:var(--amber);font-weight:700">⚠</span>' : (s.pep_status === 'no' ? '✗' : '—')}</td>
@@ -1100,6 +1103,7 @@ async function viewSubmission(id){
   document.getElementById('detail-body').innerHTML = html;
   document.getElementById('detail-actions').innerHTML = `
     <button class="btn btn-outline" onclick="closeModal('modal-detail')">Close</button>
+    <button class="btn btn-outline" onclick="generateSubmissionPDF()" title="Download the full submission as a branded PDF"><i class="ti ti-file-type-pdf"></i> Download PDF</button>
     <button class="btn btn-red" onclick="updateSubmissionStatus('${_h(id)}','rejected')">Reject</button>
     <button class="btn btn-amber" onclick="updateSubmissionStatus('${_h(id)}','edd_required')">Request EDD</button>
     <button class="btn btn-teal" onclick="updateSubmissionStatus('${_h(id)}','approved')">Approve</button>
@@ -1109,6 +1113,7 @@ async function viewSubmission(id){
   // Stash so viewDocument can resolve docs by id without another fetch
   window._currentDocs = docs;
   window._currentAppId = id;
+  window._currentDetail = { sub, shareholders, sof, questions, docs, uboSessions };
 
   // ── Async-load inline previews for the manual face-match panel ──
   // We can't embed images via createSignedUrl synchronously inside the HTML template
@@ -1150,6 +1155,269 @@ async function _populateFaceMatchSlot(slotId){
 // ── DOCUMENT VIEWING / DOWNLOADING (signed URLs + audit log) ──
 // Creates a short-lived signed URL for a private storage object and opens/downloads it.
 // Every access is recorded in kyc_audit_log for compliance trail.
+
+// ════════════════════════════════════════════════════════════════════════
+// SUBMISSION PDF REPORT (AMLCO download) — built from DB data, not the form's
+// live DOM. Mirrors the client-side report's branding.
+// ════════════════════════════════════════════════════════════════════════
+const PDF_C = {
+  blue: [28,117,188], bluePale: [240,247,253], surface: [245,246,248],
+  text: [26,35,50], muted: [90,100,120], subtle: [138,150,168],
+  teal: [29,158,117], red: [192,57,43], border: [225,228,232], stripe: [250,251,253],
+};
+const PREDEEVO_LOGO_PDF = 'data:image/png;base64,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';
+const PDF_Q_TITLES = { other_names:'Other names', ownership:'Ownership (acting for self)', entry:'Entry refusal', ml:'AML awareness', prohibited:'Prohibited activities', investigations:'Investigations', convictions:'Convictions', bankruptcy:'Bankruptcy / insolvency', tax_audit:'Tax audit', insurance:'Insurance refusal', litigation:'Litigation' };
+const PDF_Q_INV = { ownership:true, ml:true };
+const PDF_SOF_LABELS = { employment_income:'Employment income / salary', savings_deposits:'Savings / accumulated deposits', property_sale:'Sale of property or assets', share_sale:'Sale of shares or investments', loan:'Loan (director, bank, or other)', company_sale:'Sale of business or company', company_dividends:'Company dividends / profits', inheritance:'Inheritance or gift', other:'Other' };
+const PDF_SOW_LABELS = { employment:'Long-term employment / professional income', business:'Business ownership or sale of business', inheritance:'Inheritance or gifts', property:'Sale of property or assets', investments:'Investments / portfolio growth', other:'Other' };
+
+function _pdfEur(n){
+  if(n === null || n === undefined || n === '' || isNaN(Number(n))) return '—';
+  return 'EUR ' + Number(n).toLocaleString('en-GB');
+}
+function _pdfHeaderBar(doc, title){
+  const w = doc.internal.pageSize.getWidth();
+  doc.setFillColor(PDF_C.blue[0], PDF_C.blue[1], PDF_C.blue[2]);
+  doc.rect(0, 0, w, 18, 'F');
+  try { doc.addImage(PREDEEVO_LOGO_PDF, 'PNG', 12, 4.6, 42, 8.9); }
+  catch(e){
+    doc.setTextColor(255,255,255);
+    doc.setFont('helvetica','bold'); doc.setFontSize(11);
+    doc.text('PREDEEVO', 12, 11);
+  }
+  doc.setTextColor(210,228,244);
+  doc.setFont('helvetica','normal'); doc.setFontSize(8.5);
+  doc.text(title, w - 12, 11, {align:'right'});
+  doc.setTextColor(PDF_C.text[0], PDF_C.text[1], PDF_C.text[2]);
+}
+function _pdfSection(doc, y, text){
+  const w = doc.internal.pageSize.getWidth();
+  doc.setFillColor(PDF_C.bluePale[0], PDF_C.bluePale[1], PDF_C.bluePale[2]);
+  doc.roundedRect(12, y, w-24, 7, 1.2, 1.2, 'F');
+  doc.setTextColor(PDF_C.blue[0], PDF_C.blue[1], PDF_C.blue[2]);
+  doc.setFont('helvetica','bold'); doc.setFontSize(9.5);
+  doc.text(text.toUpperCase(), 15, y+4.8);
+  doc.setTextColor(PDF_C.text[0], PDF_C.text[1], PDF_C.text[2]);
+  doc.setFont('helvetica','normal'); doc.setFontSize(9);
+  return y + 10;
+}
+function _pdfTbl(doc, opts, title){
+  const base = {
+    styles: {font:'helvetica', fontSize:8, cellPadding:1.7, textColor:PDF_C.text, lineColor:PDF_C.border, lineWidth:0.1},
+    headStyles: {fillColor:PDF_C.bluePale, textColor:PDF_C.blue, fontStyle:'bold'},
+    alternateRowStyles: {fillColor:PDF_C.stripe},
+    margin: {top:24, left:12, right:12},
+    didDrawPage: function(){ _pdfHeaderBar(doc, title); },
+  };
+  const merged = Object.assign({}, base, opts);
+  merged.styles = Object.assign({}, base.styles, opts.styles || {});
+  merged.headStyles = Object.assign({}, base.headStyles, opts.headStyles || {});
+  merged.margin = Object.assign({}, base.margin, opts.margin || {});
+  doc.autoTable(merged);
+  return doc.lastAutoTable.finalY;
+}
+function _pdfKv(doc, y, rows, title){
+  return _pdfTbl(doc, { startY:y, head:[['Field','Value']], body:rows, theme:'plain',
+    styles:{fontSize:8, cellPadding:1.5},
+    columnStyles:{0:{cellWidth:52, textColor:PDF_C.muted, fontStyle:'bold'}} }, title);
+}
+
+function generateSubmissionPDF(){
+  const d = window._currentDetail;
+  if(!d || !d.sub){ alert('Please reopen the submission and try again.'); return; }
+  if(!window.jspdf || !window.jspdf.jsPDF){ alert('PDF library still loading — please try again in a moment.'); return; }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({unit:'mm', format:'a4'});
+  const sub = d.sub;
+  const T = 'KYC Submission Report';
+  const w = doc.internal.pageSize.getWidth();
+  const ap = (d.shareholders || []).find(function(s){ return s.is_applicant; }) || {};
+  const apName = ap.full_name || [ap.first_name, ap.surname].filter(Boolean).join(' ') || '—';
+  _pdfHeaderBar(doc, T);
+  let y = 26;
+
+  doc.setFontSize(15); doc.setFont('helvetica','bold');
+  doc.text('KYC Submission Report', 12, y); y += 4;
+  doc.setFillColor(PDF_C.surface[0], PDF_C.surface[1], PDF_C.surface[2]);
+  doc.roundedRect(12, y, w-24, 13, 1.2, 1.2, 'F');
+  doc.setFontSize(8); doc.setFont('helvetica','normal');
+  doc.setTextColor(PDF_C.muted[0], PDF_C.muted[1], PDF_C.muted[2]);
+  doc.text('Reference', 16, y+5); doc.text('Submitted', 76, y+5); doc.text('Status', 136, y+5);
+  doc.setTextColor(PDF_C.text[0], PDF_C.text[1], PDF_C.text[2]); doc.setFont('helvetica','bold');
+  doc.text(String(sub.reference || '—'), 16, y+9.5);
+  doc.text(sub.submitted_at ? new Date(sub.submitted_at).toLocaleString('en-GB') : '—', 76, y+9.5);
+  doc.text(String(sub.status || '—'), 136, y+9.5);
+  doc.setFont('helvetica','normal');
+  y += 17;
+  doc.setFontSize(7.5); doc.setTextColor(PDF_C.subtle[0], PDF_C.subtle[1], PDF_C.subtle[2]);
+  doc.text('Generated from the compliance dashboard on ' + new Date().toLocaleString('en-GB') + ' by the reviewing officer.', 12, y);
+  doc.setTextColor(PDF_C.text[0], PDF_C.text[1], PDF_C.text[2]); y += 6;
+
+  // 1 — Applicant identity
+  y = _pdfSection(doc, y, '1. Applicant identity');
+  const idBits = [];
+  if(ap.passport_number) idBits.push('Passport ' + ap.passport_number + (ap.passport_expiry ? ' (expires ' + ap.passport_expiry + ')' : ''));
+  if(ap.id_card_number) idBits.push('ID card ' + ap.id_card_number + (ap.id_card_expiry ? ' (expires ' + ap.id_card_expiry + ')' : ''));
+  y = _pdfKv(doc, y, [
+    ['Full name', apName],
+    ['Date of birth', ap.dob || '—'],
+    ['Nationality', [ap.nationality, ap.second_nationality].filter(Boolean).join(' / ') || '—'],
+    ['Country of residence', ap.country_of_residence || '—'],
+    ['Identity document', idBits.join('  ·  ') || '—'],
+    ['Email', ap.email || '—'],
+    ['Mobile', [ap.mobile_country_code, ap.mobile].filter(Boolean).join(' ') || '—'],
+    ['Address', [ap.addr_street, ap.addr_town, ap.addr_postcode].filter(Boolean).join(', ') || '—'],
+    ['Occupation', [ap.occupation, ap.employment_status].filter(Boolean).join(' — ') || '—'],
+    ['Tax residence / TIN', [ap.tax_country, ap.tin].filter(Boolean).join(' / ') || '—'],
+    ['Annual income', ap.annual_income || '—'],
+    ['PEP status', ap.pep_status === 'yes' ? 'Yes — enhanced due diligence applies' : (ap.pep_status === 'no' ? 'No' : '—')],
+  ], T) + 6;
+
+  // 2 — Engagement
+  if(y > 240){ doc.addPage(); _pdfHeaderBar(doc, T); y = 26; }
+  y = _pdfSection(doc, y, '2. Engagement details');
+  const engAll = [
+    ['Services selected', Array.isArray(sub.services) ? sub.services.join(', ') : (sub.services || '—')],
+    ['Introduced by', sub.introduced_by || '—'],
+    ['Proposed company name', sub.company_name || '—'],
+    ['Company type', sub.company_type || '—'],
+    ['Country of incorporation', sub.country_of_incorp || '—'],
+    ['Principal activities', sub.principal_activities || sub.entity_activities || '—'],
+    ['Economic rationale', sub.economic_rationale || sub.entity_rationale || '—'],
+    ['Expected turnover Y1', _pdfEur(sub.turnover_y1 != null ? sub.turnover_y1 : sub.entity_turnover_y1)],
+    ['Share capital', _pdfEur(sub.share_capital)],
+    ['Countries of operation', sub.countries_operation || '—'],
+    ['Directors', Array.isArray(sub.directors) && sub.directors.length ? sub.directors.join(', ') : '—'],
+    ['Company secretary', sub.company_secretary || '—'],
+    ['Registered office', sub.registered_office || '—'],
+    ['Existing entity', [sub.entity_name, sub.entity_country, sub.entity_reg_number].filter(Boolean).join(' · ') || '—'],
+  ];
+  y = _pdfKv(doc, y, engAll.filter(function(r, i){ return i === 0 || r[1] !== '—'; }), T) + 6;
+
+  // 3 — Shareholders & UBOs
+  if(y > 230){ doc.addPage(); _pdfHeaderBar(doc, T); y = 26; }
+  y = _pdfSection(doc, y, '3. Shareholders & UBOs');
+  if((d.shareholders || []).length){
+    y = _pdfTbl(doc, { startY:y,
+      head:[['Name','DOB','Nationality','Residence','%','Role','PEP','KYC']],
+      body: d.shareholders.map(function(r){ return [
+        r.full_name || '—',
+        r.dob || '—',
+        [r.nationality, r.second_nationality].filter(Boolean).join(' / ') || '—',
+        r.country_of_residence || '—',
+        (r.shareholding_pct !== null && r.shareholding_pct !== undefined) ? r.shareholding_pct + '%' : '—',
+        [r.is_applicant && 'Applicant', r.is_ubo && 'UBO'].filter(Boolean).join(' · ') || 'Shareholder',
+        r.pep_status === 'yes' ? 'PEP' : (r.pep_status === 'no' ? 'No' : '—'),
+        r.kyc_status === 'self_completed' ? 'own link' : (r.kyc_status || '—'),
+      ]; }),
+      styles:{fontSize:7.5, cellPadding:1.4},
+      headStyles:{fillColor:PDF_C.blue, textColor:[255,255,255]} }, T) + 6;
+  } else {
+    doc.setFontSize(8); doc.setTextColor(PDF_C.subtle[0], PDF_C.subtle[1], PDF_C.subtle[2]);
+    doc.text('No shareholder rows on file.', 14, y);
+    doc.setTextColor(PDF_C.text[0], PDF_C.text[1], PDF_C.text[2]); y += 6;
+  }
+
+  // 4 — Source of funds
+  if(y > 240){ doc.addPage(); _pdfHeaderBar(doc, T); y = 26; }
+  y = _pdfSection(doc, y, '4. Source of funds');
+  if((d.sof || []).length){
+    const total = d.sof.reduce(function(a, r){ return a + (Number(r.amount_eur) || 0); }, 0);
+    const rows = d.sof.map(function(r){ return [PDF_SOF_LABELS[r.sof_type] || r.sof_type || '—', _pdfEur(r.amount_eur)]; });
+    rows.push(['Total', _pdfEur(total)]);
+    y = _pdfTbl(doc, { startY:y, head:[['Source','Amount']], body:rows,
+      columnStyles:{1:{cellWidth:40, halign:'right'}},
+      didParseCell: function(c){ if(c.section === 'body' && c.row.index === rows.length - 1){ c.cell.styles.fontStyle = 'bold'; c.cell.styles.fillColor = PDF_C.bluePale; } } }, T) + 6;
+  } else {
+    doc.setFontSize(8); doc.setTextColor(PDF_C.subtle[0], PDF_C.subtle[1], PDF_C.subtle[2]);
+    doc.text('No sources of funds declared.', 14, y);
+    doc.setTextColor(PDF_C.text[0], PDF_C.text[1], PDF_C.text[2]); y += 6;
+  }
+
+  // 5 — Source of wealth (PEP)
+  if(sub.sow_sources && Object.keys(sub.sow_sources).length){
+    if(y > 230){ doc.addPage(); _pdfHeaderBar(doc, T); y = 26; }
+    y = _pdfSection(doc, y, '5. Source of wealth (PEP / EDD)');
+    const sowRows = Object.entries(sub.sow_sources).map(function(kv){
+      return [PDF_SOW_LABELS[kv[0]] || kv[0], _pdfEur(kv[1]), kv[0] === 'other' ? (sub.sow_other_description || '—') : ''];
+    });
+    sowRows.push(['Total declared wealth', _pdfEur(sub.sow_total_declared), '']);
+    y = _pdfTbl(doc, { startY:y, head:[['Source','Amount','Notes']], body:sowRows,
+      columnStyles:{1:{cellWidth:40, halign:'right'}},
+      didParseCell: function(c){ if(c.section === 'body' && c.row.index === sowRows.length - 1){ c.cell.styles.fontStyle = 'bold'; c.cell.styles.fillColor = PDF_C.bluePale; } } }, T) + 6;
+  }
+
+  // 6 — Questionnaires (applicant + each own-link UBO)
+  const qBlocks = [];
+  if((d.questions || []).length){
+    qBlocks.push({ who: 'Applicant — ' + apName, rows: d.questions.map(function(r){ return { question_id: r.question_id, answer: r.answer === true, details: r.details }; }) });
+  }
+  (d.uboSessions || []).forEach(function(s){
+    if(s.status === 'completed' && s.fields && Array.isArray(s.fields.questionnaire) && s.fields.questionnaire.length){
+      qBlocks.push({ who: s.person_name + ' (own link)', rows: s.fields.questionnaire });
+    }
+  });
+  qBlocks.forEach(function(b, bi){
+    if(y > 220){ doc.addPage(); _pdfHeaderBar(doc, T); y = 26; }
+    y = _pdfSection(doc, y, '6.' + (bi + 1) + ' Background questionnaire — ' + b.who);
+    const adverse = [];
+    const rows = b.rows.map(function(r, i){
+      adverse.push(PDF_Q_INV[r.question_id] ? r.answer === false : r.answer === true);
+      return [String(i + 1), PDF_Q_TITLES[r.question_id] || r.question_id, r.answer ? 'YES' : 'NO', r.details || '—'];
+    });
+    y = _pdfTbl(doc, { startY:y, head:[['#','Topic','Answer','Details']], body:rows,
+      styles:{fontSize:7.5, cellPadding:1.4, valign:'top'},
+      columnStyles:{0:{cellWidth:7}, 1:{cellWidth:52}, 2:{cellWidth:14, halign:'center'}},
+      didParseCell: function(c){
+        if(c.section === 'body' && c.column.index === 2){
+          c.cell.styles.fontStyle = 'bold';
+          c.cell.styles.textColor = adverse[c.row.index] ? PDF_C.red : PDF_C.teal;
+        }
+      } }, T) + 6;
+  });
+
+  // 7 — Documents
+  if(y > 235){ doc.addPage(); _pdfHeaderBar(doc, T); y = 26; }
+  y = _pdfSection(doc, y, '7. Documents on file');
+  if((d.docs || []).length){
+    y = _pdfTbl(doc, { startY:y, head:[['Type','Person','File','Uploaded']],
+      body: d.docs.map(function(x){ return [
+        (x.doc_type || '').replace(/_/g, ' '),
+        x.person_label || 'Applicant',
+        x.file_name || '—',
+        x.uploaded_at ? new Date(x.uploaded_at).toLocaleDateString('en-GB') : '—',
+      ]; }),
+      styles:{fontSize:7.5, cellPadding:1.4} }, T) + 6;
+  }
+
+  // 8 — Declarations & signature
+  if(y > 235){ doc.addPage(); _pdfHeaderBar(doc, T); y = 26; }
+  y = _pdfSection(doc, y, '8. Declarations & signature');
+  const decls = [
+    ['Data protection consent', sub.decl_gdpr || sub.express_consent], ['Accuracy', sub.decl_accuracy],
+    ['Legitimate funds', sub.decl_funds], ['PEP & sanctions', sub.decl_pep], ['Duty to update', sub.decl_update],
+    ['MOKAS acknowledgment', sub.decl_mokas], ['AML awareness', sub.decl_aml],
+  ];
+  const sigLbl = sub.sig_method === 'own' ? 'Own electronic signature (eIDAS AdES/QES)'
+    : sub.sig_method === 'physical' ? 'Wet ink — printed and signed by hand' : '—';
+  y = _pdfKv(doc, y, decls.map(function(x){ return [x[0], x[1] ? 'Confirmed' : 'NOT confirmed']; })
+    .concat([['Signature method', sigLbl], ['Signature reference', sub.sig_reference || '—'],
+             ['Identity selfie', (d.docs || []).some(function(x){ return x.doc_type === 'identity_selfie'; }) ? 'On file' : 'Not on file']]), T);
+
+  // Footer on every page
+  const total = doc.internal.getNumberOfPages();
+  const h = doc.internal.pageSize.getHeight();
+  for(let i = 1; i <= total; i++){
+    doc.setPage(i);
+    doc.setDrawColor(PDF_C.border[0], PDF_C.border[1], PDF_C.border[2]); doc.setLineWidth(0.2);
+    doc.line(12, h-10, w-12, h-10);
+    doc.setFontSize(7); doc.setTextColor(PDF_C.subtle[0], PDF_C.subtle[1], PDF_C.subtle[2]);
+    doc.text('Predeevo Ltd · Sintika Hanum 58, 6051 Larnaca, Cyprus · Cyprus AML Law 188(I)/2007', 12, h-6.5);
+    doc.text((sub.reference || '') + ' · Page ' + i + ' of ' + total, w-12, h-6.5, {align:'right'});
+  }
+
+  doc.save('Predeevo-KYC-' + (sub.reference || 'submission') + '.pdf');
+}
 
 const SIGNED_URL_TTL_SECONDS = 300;  // 5 minutes — long enough to view, short enough to prevent sharing
 
