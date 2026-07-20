@@ -1321,11 +1321,15 @@ function openNewInvitation(){
   if(reqSelfie) reqSelfie.checked = true;
   // Refresh conditional label
   onInvTypeChange();
-  // Reset modal state
+  // Reset modal state — including button enabled-state and labels: after a
+  // successful "Create + Send email" the buttons were left disabled with a
+  // "Creating..." label, so a second invitation in the same session was stuck.
   document.getElementById('invite-result').style.display = 'none';
   document.getElementById('invite-form').style.display = 'block';
-  document.getElementById('invite-submit-btn').style.display = 'inline-flex';
-  document.getElementById('invite-submit-email-btn').style.display = 'inline-flex';
+  const _linkBtn = document.getElementById('invite-submit-btn');
+  const _emailBtn = document.getElementById('invite-submit-email-btn');
+  if(_linkBtn){ _linkBtn.style.display = 'inline-flex'; _linkBtn.disabled = false; _linkBtn.innerHTML = '<i class="ti ti-copy"></i>Create + Copy link'; }
+  if(_emailBtn){ _emailBtn.style.display = 'inline-flex'; _emailBtn.disabled = false; _emailBtn.innerHTML = '<i class="ti ti-mail"></i>Create + Send email'; }
   document.getElementById('invite-close-btn').textContent = 'Cancel';
   // Hide edit-mode "Save changes" button if it's lingering from a previous edit
   const saveBtn = document.getElementById('invite-save-btn');
